@@ -1,0 +1,52 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+backend/backend/.venv/
+venv/
+env/
+
+# Backend runtime artifacts
+backend/dev.db
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Frontend / Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Root env files
+.env
+.env.*
+!.env.example
+
+# Build / temp
+*.log
+*.tmp
+tmp/
+.cache/
+
+# Docker
+*.pid

@@ -1,0 +1,63 @@
+# Work Log
+
+## 2025-12-30
+- Created initial documentation set: charter, requirements, architecture, data model, API contracts, dev setup, security, roadmap.
+- Created base folder structure: docs, backend, frontend, infrastructure.
+- Added backend scaffolding (FastAPI app, auth, profile, sessions, audio, emotion, code, report endpoints) and database models/schemas.
+- Added frontend scaffolding (React + Vite + Tailwind + Monaco) with Arena, Login, Profile pages and audio/video/code components.
+- Added Docker scaffolding (backend/frontend Dockerfiles, compose stack, sandbox placeholder, .dockerignore).
+- Added integration runbook steps document.
+- Added detailed backend/frontend/docker structure docs.
+- Added Alembic configuration and initial migration (backend/alembic/*) plus init_db script.
+- Implemented OpenAI STT/LLM/TTS pipeline in backend/app/services/ai_client.py.
+- Implemented Docker-based sandbox execution with resource limits and language support.
+- Updated Docker Compose to mount docker socket and tag sandbox image.
+- Expanded documentation for migrations, AI pipeline, and sandbox execution.
+- Added Postgres connectivity check with SQLite fallback in backend/app/db/session.py and documented fallback behavior.
+- Documented how to start the app using Docker Compose and local dev in docs/05-dev-setup.md and docs/08-integration-steps.md.
+- Added scripts/dev_up.sh to auto-create missing .env files and start Docker Compose.
+- Removed obsolete version field from docker-compose.yml to eliminate warning.
+- Updated docs to reference the helper script for startup.
+- Added email-validator dependency for Pydantic EmailStr.
+- Added DB connect retries before SQLite fallback and documented new env vars.
+- Renamed InterviewMessage metadata attribute to metadata_ to avoid SQLAlchemy reserved name while keeping DB column name.
+- Refreshed frontend UI with new typography, palette, layout, and animations; added desktop zoom 0.75.
+- Documented UI decisions in docs/15-frontend-ui.md.
+- Removed custom zoom scaling; UI now renders at 100% zoom on all screens.
+- Implemented real DeepFace/OpenCV emotion detection with heuristics and documented pipeline in docs/13-ai-pipeline.md.
+- Added Gemini API support toggle in ai_client, new env vars (AI_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL), and documented provider options.
+- Added AI provider selector in Profile + Arena displays value and sends it with audio requests, enabling frontend switch between OpenAI and Gemini.
+- Ensured OpenCV (cv2) dependencies are installed in backend Docker by adding apt libs and the requirements-vision file; updated docs to mention the vision dependency pipeline.
+- Adjusted backend Docker apt deps to `libgl1` (trixie no longer exposes `libgl1-mesa-glx`) and documented the new requirement.
+- Fixed backend Docker build by copying requirements-vision.txt before pip install.
+- Added tensorflow dependency in requirements-vision.txt to satisfy DeepFace/mtcnn import; documented native libs note in dev setup.
+- Updated scripts/dev_up.sh to skip rebuild by default; optional rebuild via DEV_UP_BUILD=1 or --build. Docs updated (README.md, docs/05-dev-setup.md).
+- Fixed scripts/dev_up.sh nounset issue by guarding empty array expansion when no --build is passed.
+- Adjusted UI palette to darker text and nav links for better contrast on light background.
+- Increased text contrast and lightened background/dot overlay for readability in frontend theme.
+- Improved card text contrast in frontend by forcing card titles/body to use strong text colors.
+- Added typing_extensions pin (>=4.12.2) to fix backend import error during startup.
+- Strengthened card text contrast (surface-card paragraphs use main text color).
+- Changed dev_up.sh to rebuild by default; skip rebuild via DEV_UP_NO_BUILD=1 or --no-build. Updated README and docs/05-dev-setup.md accordingly.
+- Bumped pydantic to 2.9.2 to satisfy typing_extensions TypeAliasType dependency in backend runtime.
+- Switched dev_up.sh to skip rebuild by default for faster startup; rebuild via DEV_UP_BUILD=1 or --build. Updated README and docs/05-dev-setup.md accordingly.
+- Forced typing_extensions==4.12.2 install after vision deps (tensorflow) to avoid runtime TypeAliasType import errors.
+- Added backend entrypoint to auto-run migrations (alembic upgrade head) before starting API; updated docs for auto-migrations.
+- Hardened backend entrypoint: retry alembic migrations (DB waits) before starting API to avoid missing tables in Postgres.
+- Added frontend validation hint on register for 422 cases (email valid, min 8 chars password, non-empty fields).
+- Updated register endpoint to return 409 'Account already exists' when email is already registered.
+- Added backend validation for bcrypt length (400 if password >72 bytes) and frontend guard message for register flow.
+- Switched password hashing to bcrypt_sha256 (no 72-byte limit) and removed frontend byte-length guard; validation remains min 8 chars.
+- Switched password hashing to pbkdf2_sha256 to avoid bcrypt backend length quirks and errors on long passwords.
+- Fixed profile response validation by using UUID types in ProfileOut (FastAPI was erroring when serializing UUIDs as strings).
+- Added OpenAI/Gemini API key fields to the Profile page; values are persisted in profile preferences for provider switching.
+- Fixed interview session responses to serialize UUIDs via SessionOut before returning, preventing validation errors on /sessions endpoints.
+- Added full_name to profiles (migration), required at register; surfaced in Profile page and registration form with conditional AI key inputs (only the selected provider’s key is shown while both are stored).
+- Added voice preference (male/female) stored in profile preferences and used for OpenAI TTS (female→nova, male→onyx). Backend now passes user preferences into the audio pipeline and respects custom TTS voice. SessionOut accepts datetimes to avoid validation errors when starting sessions.
+- Hardened session/emotion UX: Arena now requires auth before creating/starting sessions or capturing emotions; VideoSnapshot surfaces auth errors. Emotion service now handles DeepFace list responses safely (no AttributeError on camera open).
+- Added session listing endpoint and UI history panel (last sessions) in Arena; combined Voice Loop and Emotion Tracking into one panel; session cards show start/end/created timestamps and live raw emotion scores debug view.
+- Start Session button now auto-creates a session if none exists and re-enables itself (no disabled state), reducing user friction when launching a session.
+- Added interviewer gender preference (male/female) in Profile; mapped to TTS voice selection and an on-start avatar. Arena now shows the avatar and an initial greeting using the user’s name when a session starts.
+- Added AI model selectors per provider (OpenAI: gpt-4o/mini/3.5, Gemini: 1.5 flash/pro) and TTS model selector (OpenAI) in Profile; preferences are passed to audio pipeline via context, and AudioRecorder now submits ai_model/ai_tts_model.
+- Adjusted AI model input to free-text (no fixed list) so users can set only models supported by their API key; leaving blank uses backend defaults.
+- Added models validate endpoint that uses user-stored API keys, caches available models per provider in profile preferences, and “Validate key” buttons in Profile (OpenAI/Gemini) to fetch and persist available models; UI shows all fetched models (datalist + scrollable chips).
