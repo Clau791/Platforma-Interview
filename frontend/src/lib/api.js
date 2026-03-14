@@ -1,6 +1,6 @@
 import { getToken } from "./auth";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
 
 export async function apiRequest(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
@@ -26,7 +26,7 @@ export async function apiRequest(path, options = {}) {
   const data = contentType.includes("application/json") ? await response.json() : null;
 
   if (!response.ok) {
-    const message = data?.detail || data?.message || "Request failed";
+    const message = data?.detail || data?.message || "Cererea a eșuat";
     throw new Error(message);
   }
 

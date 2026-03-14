@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { apiRequest } from "../lib/api";
 
@@ -12,28 +12,38 @@ export default function Profile() {
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [voiceGender, setVoiceGender] = useState("female");
   const [interviewGender, setInterviewGender] = useState("female");
+  const [ttsVoice, setTtsVoice] = useState("");
   const [aiModel, setAiModel] = useState("");
   const [aiTtsModel, setAiTtsModel] = useState("");
   const [availableModels, setAvailableModels] = useState([]);
+  const [geminiVoices, setGeminiVoices] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [voiceProbeLoading, setVoiceProbeLoading] = useState(false);
+  const [voiceProbeResults, setVoiceProbeResults] = useState([]);
+  const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
+  const previewAudioRef = useRef(null);
 
   useEffect(() => {
     const loadProfile = async () => {
-      setStatus("Loading profile...");
+      setStatus("Încarc profilul...");
       try {
         const data = await apiRequest("/profile", { method: "GET" });
         setProfile(data);
         setFullName(data.full_name || "");
         const preferences = data.preferences || {};
-        setAiProvider(preferences.aiProvider || "openai");
+        const provider = preferences.aiProvider || "openai";
+        setAiProvider(provider);
         setOpenaiApiKey(preferences.openaiApiKey || "");
         setGeminiApiKey(preferences.geminiApiKey || "");
         setVoiceGender(preferences.voiceGender || "female");
         setInterviewGender(preferences.interviewGender || "female");
+        setTtsVoice(preferences.ttsVoice || "");
         setAiModel(preferences.aiModel || "");
         setAiTtsModel(preferences.aiTtsModel || "");
-        if (preferences.availableModels && preferences.availableModels[aiProvider]) {
-          setAvailableModels(preferences.availableModels[aiProvider]);
+        if (preferences.availableModels && preferences.availableModels[provider]) {
+          setAvailableModels(preferences.availableModels[provider]);
+        } else {
+          setAvailableModels([]);
         }
         setStatus("");
       } catch (error) {
@@ -43,30 +53,46 @@ export default function Profile() {
     loadProfile();
   }, []);
 
-  const fetchModels = async () => {
-    setLoadingModels(true);
-    setStatus("Loading models...");
-    try {
-      const data = await apiRequest(`/models?provider=${aiProvider}&limit=200`, { method: "GET" });
-      setAvailableModels(data.models || []);
-      setStatus("");
-    } catch (error) {
-      setStatus(error.message);
-    } finally {
-      setLoadingModels(false);
-    }
-  };
+  useEffect(() => {
+    const preferences = profile?.preferences || {};
+    const cached = preferences.availableModels?.[aiProvider] || [];
+    setAvailableModels(cached);
+  }, [aiProvider, profile]);
+
+  useEffect(() => {
+    const loadGeminiVoices = async () => {
+      if (aiProvider !== "gemini") {
+        return;
+      }
+      try {
+        const data = await apiRequest("/models/gemini/voices", { method: "GET" });
+        setGeminiVoices(data.voices || []);
+      } catch {
+        setGeminiVoices([]);
+      }
+    };
+    loadGeminiVoices();
+  }, [aiProvider]);
 
   const validateKey = async () => {
     setLoadingModels(true);
-    setStatus("Validating key and fetching models...");
+    setStatus("Validez cheia și încarc modelele...");
     const key = aiProvider === "openai" ? openaiApiKey : geminiApiKey;
     try {
-      const data = await apiRequest(
-        `/models/validate?provider=${aiProvider}&limit=200&api_key=${encodeURIComponent(key || "")}`,
-        { method: "POST" }
-      );
+      const data = await apiRequest(`/models/validate?provider=${aiProvider}`, {
+        method: "POST",
+        body: {
+          api_key: key || null,
+          limit: 200,
+        },
+      });
       setAvailableModels(data.models || []);
+      if (data.selected_model) {
+        setAiModel(data.selected_model);
+      }
+      if (data.selected_tts_model) {
+        setAiTtsModel(data.selected_tts_model);
+      }
       // also persist key by updating local prefs fields
       if (aiProvider === "openai" && key) {
         setOpenaiApiKey(key);
@@ -74,7 +100,25 @@ export default function Profile() {
       if (aiProvider === "gemini" && key) {
         setGeminiApiKey(key);
       }
-      setStatus("Key validated and models cached.");
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const existingPrefs = prev.preferences || {};
+        const nextAvailable = {
+          ...(existingPrefs.availableModels || {}),
+          [aiProvider]: data.models || [],
+        };
+        const nextPrefs = {
+          ...existingPrefs,
+          aiProvider,
+          availableModels: nextAvailable,
+          aiModel: data.selected_model || aiModel,
+          aiTtsModel: data.selected_tts_model || aiTtsModel,
+          ...(aiProvider === "openai" && key ? { openaiApiKey: key } : {}),
+          ...(aiProvider === "gemini" && key ? { geminiApiKey: key } : {}),
+        };
+        return { ...prev, preferences: nextPrefs };
+      });
+      setStatus("Cheie validată. Modelele au fost memorate.");
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -86,7 +130,7 @@ export default function Profile() {
     if (!profile) {
       return;
     }
-    setStatus("Saving...");
+    setStatus("Salvez...");
     try {
       const data = await apiRequest("/profile", {
         method: "PUT",
@@ -102,6 +146,7 @@ export default function Profile() {
             geminiApiKey,
             voiceGender,
             interviewGender,
+            ttsVoice,
             aiModel,
             aiTtsModel,
           },
@@ -115,35 +160,113 @@ export default function Profile() {
       setGeminiApiKey(preferences.geminiApiKey || "");
       setVoiceGender(preferences.voiceGender || voiceGender);
       setInterviewGender(preferences.interviewGender || interviewGender);
+      setTtsVoice(preferences.ttsVoice || ttsVoice);
       setAiModel(preferences.aiModel || aiModel);
       setAiTtsModel(preferences.aiTtsModel || aiTtsModel);
-      setStatus("Saved.");
+      setStatus("Salvat.");
     } catch (error) {
       setStatus(error.message);
     }
   };
 
-  if (!profile) {
-    return <p className="muted text-sm">{status || "No profile loaded"}</p>;
+  const probeGeminiVoices = async () => {
+    setVoiceProbeLoading(true);
+    setStatus("Testez vocile Gemini disponibile...");
+    try {
+      const data = await apiRequest("/models/gemini/voices/probe", {
+        method: "POST",
+        body: {
+          api_key: geminiApiKey || null,
+          model: aiTtsModel || "gemini-2.5-flash-preview-tts",
+        },
+      });
+      setVoiceProbeResults(data.results || []);
+      const okCount = (data.results || []).filter((item) => item.available).length;
+      setStatus(`Probe complet: ${okCount}/${(data.results || []).length} voci disponibile.`);
+    } catch (error) {
+      setStatus(error.message);
+      setVoiceProbeResults([]);
+    } finally {
+      setVoiceProbeLoading(false);
     }
+  };
+
+  const previewSelectedVoice = async () => {
+    setVoicePreviewLoading(true);
+    setStatus("Generez preview de voce...");
+    try {
+      const provider = aiProvider || "openai";
+      const providerKey = provider === "gemini" ? geminiApiKey : openaiApiKey;
+      const sampleText = fullName
+        ? `Bună, ${fullName}! Acesta este un preview de voce pentru interviu.`
+        : "Bună! Acesta este un preview de voce pentru interviu.";
+
+      const data = await apiRequest("/models/voice-preview", {
+        method: "POST",
+        body: {
+          provider,
+          api_key: providerKey || null,
+          ai_tts_model: aiTtsModel || null,
+          tts_voice: ttsVoice || null,
+          voice_gender: voiceGender || null,
+          interview_gender: interviewGender || null,
+          text: sampleText,
+        },
+      });
+
+      if (!data?.tts_audio_url) {
+        setStatus("Nu am primit audio pentru preview.");
+        return;
+      }
+
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+
+      const audio = new Audio(data.tts_audio_url);
+      previewAudioRef.current = audio;
+      await audio.play();
+      setStatus(
+        `Preview voce redat (${data.resolved_voice || "auto"} | ${data.resolved_tts_model || "implicit"}).`
+      );
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setVoicePreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  if (!profile) {
+    return <p className="muted text-sm">{status || "Profilul nu a fost încărcat."}</p>;
+  }
 
   return (
     <div className="space-y-5 fade-up">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="hero-title">Your profile</h1>
+          <h1 className="hero-title">Profilul tău</h1>
           <p className="hero-subtitle">
-            Keep your target role and tech stack up to date for smarter interview
-            questions.
+            Ține rolul țintă și stack-ul tehnic actualizate pentru întrebări de interviu
+            mai relevante.
           </p>
         </div>
-        <span className="pill">Profile Settings</span>
+        <span className="pill">Setări profil</span>
       </div>
 
       <div className="surface-card space-y-4">
         <div className="grid gap-3 md:grid-cols-2">
           <label className="space-y-2">
-            <span className="form-label">Full name</span>
+            <span className="form-label">Nume complet</span>
             <input
               className="input-field"
               value={fullName}
@@ -151,7 +274,7 @@ export default function Profile() {
             />
           </label>
           <label className="space-y-2">
-            <span className="form-label">Experience level</span>
+            <span className="form-label">Nivel experiență</span>
             <input
               className="input-field"
               value={profile.experience_level || ""}
@@ -161,7 +284,7 @@ export default function Profile() {
             />
           </label>
           <label className="space-y-2">
-            <span className="form-label">Target role</span>
+            <span className="form-label">Rol țintă</span>
             <input
               className="input-field"
               value={profile.target_role || ""}
@@ -171,7 +294,7 @@ export default function Profile() {
             />
           </label>
           <label className="space-y-2">
-            <span className="form-label">AI Provider</span>
+            <span className="form-label">Provider AI</span>
             <select
               className="input-field"
               value={aiProvider}
@@ -182,7 +305,7 @@ export default function Profile() {
             </select>
           </label>
           <label className="space-y-2">
-            <span className="form-label">AI Model</span>
+            <span className="form-label">Model AI</span>
             <input
               className="input-field"
               value={aiModel}
@@ -190,7 +313,8 @@ export default function Profile() {
               placeholder="Lasă gol pentru modelul implicit"
             />
             <span className="muted text-xs">
-              Validate Your API key and choose from available models below.
+              Validează cheia și alege din modelele disponibile. Pentru Gemini sunt afișate doar modele native
+              dialog/audio.
             </span>
 
             {availableModels.length > 0 && (
@@ -217,40 +341,59 @@ export default function Profile() {
                 <input
                   className="input-field flex-1"
                   type="password"
-                  placeholder="Add OpenAI API KEY"
+                  placeholder="Adaugă cheia OpenAI API"
                   value={openaiApiKey}
                   onChange={(event) => setOpenaiApiKey(event.target.value)}
                 />
                 <button type="button" className="btn-ghost text-xs whitespace-nowrap" onClick={validateKey} disabled={loadingModels}>
-                  Validate key
+                  Validează cheia
                 </button>
               </div>
-              <span className="muted text-xs">Stored in your profile preferences.</span>
+              <span className="muted text-xs">Cheia este stocată în preferințele profilului.</span>
             </label>
           )}
           <label className="space-y-2">
-            <span className="form-label">Voice model</span>
-            <select
-              className="input-field"
-              value={voiceGender}
-              onChange={(event) => setVoiceGender(event.target.value)}
-            >
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-            </select>
+            <span className="form-label">Tip voce</span>
+            <div className="flex items-center gap-2">
+              <select
+                className="input-field flex-1"
+                value={voiceGender}
+                onChange={(event) => setVoiceGender(event.target.value)}
+              >
+                <option value="female">Feminin</option>
+                <option value="male">Masculin</option>
+              </select>
+              <button
+                type="button"
+                className="btn-ghost inline-flex h-10 w-10 items-center justify-center rounded-lg"
+                onClick={previewSelectedVoice}
+                disabled={voicePreviewLoading}
+                title="Redă preview voce"
+                aria-label="Redă preview voce"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="currentColor"
+                >
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </button>
+            </div>
             <span className="muted text-xs">
               Folosit pentru vocea TTS (OpenAI: female→nova, male→onyx).
             </span>
           </label>
           {aiProvider === "openai" && (
             <label className="space-y-2">
-              <span className="form-label">TTS Model (OpenAI)</span>
+              <span className="form-label">Model TTS (OpenAI)</span>
               <select
                 className="input-field"
                 value={aiTtsModel}
                 onChange={(event) => setAiTtsModel(event.target.value)}
               >
-                <option value="">Default (env)</option>
+                <option value="">Implicit (env)</option>
                 <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
                 <option value="tts-1">tts-1</option>
                 <option value="tts-1-hd">tts-1-hd</option>
@@ -259,14 +402,14 @@ export default function Profile() {
             </label>
           )}
           <label className="space-y-2">
-            <span className="form-label">Interviewer avatar</span>
+            <span className="form-label">Avatar intervievator</span>
             <select
               className="input-field"
               value={interviewGender}
               onChange={(event) => setInterviewGender(event.target.value)}
             >
-              <option value="female">Female</option>
-              <option value="male">Male</option>
+              <option value="female">Feminin</option>
+              <option value="male">Masculin</option>
             </select>
             <span className="muted text-xs">Controalează avatarul și vocea implicită a coach-ului.</span>
           </label>
@@ -277,19 +420,91 @@ export default function Profile() {
                 <input
                   className="input-field flex-1"
                   type="password"
-                  placeholder="Add Gemini API KEY"
+                  placeholder="Adaugă cheia Gemini API"
                   value={geminiApiKey}
                   onChange={(event) => setGeminiApiKey(event.target.value)}
                 />
                 <button type="button" className="btn-ghost text-xs whitespace-nowrap" onClick={validateKey} disabled={loadingModels}>
-                  Validate key
+                  Validează cheia
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-xs whitespace-nowrap"
+                  onClick={probeGeminiVoices}
+                  disabled={voiceProbeLoading}
+                >
+                  Probe voci
                 </button>
               </div>
-              <span className="muted text-xs">Add Gemini API KEY for the Gemini provider.</span>
+              <span className="muted text-xs">Adaugă cheia Gemini API pentru providerul Gemini.</span>
+              <span className="muted text-xs">
+                După validare, providerul activ devine Gemini și modelul este selectat automat.
+              </span>
+            </label>
+          )}
+          {aiProvider === "gemini" && (
+            <label className="space-y-2">
+              <span className="form-label">Voce Gemini (TTS)</span>
+              <div className="flex items-center gap-2">
+                <select
+                  className="input-field flex-1"
+                  value={ttsVoice}
+                  onChange={(event) => setTtsVoice(event.target.value)}
+                >
+                  <option value="">Auto după gen (male/female)</option>
+                  {geminiVoices.map((voiceName) => (
+                    <option key={voiceName} value={voiceName}>
+                      {voiceName}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-ghost inline-flex h-10 w-10 items-center justify-center rounded-lg"
+                  onClick={previewSelectedVoice}
+                  disabled={voicePreviewLoading}
+                  title="Redă preview voce"
+                  aria-label="Redă preview voce"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="currentColor"
+                  >
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </button>
+              </div>
+              <span className="muted text-xs">
+                Dacă alegi o voce explicită, are prioritate peste setarea Female/Male.
+              </span>
+              {voiceProbeResults.length > 0 && (
+                <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">
+                  <div className="flex flex-wrap gap-2">
+                    {voiceProbeResults.map((item) => (
+                      <button
+                        type="button"
+                        key={item.voice}
+                        onClick={() => {
+                          if (item.available) {
+                            setTtsVoice(item.voice);
+                          }
+                        }}
+                        className={`pill ${item.available ? "border border-emerald-500" : "border border-rose-400"
+                          } ${ttsVoice === item.voice ? "ring-1 ring-[color:var(--accent)]" : ""}`}
+                        title={item.error || ""}
+                      >
+                        {item.voice}: {item.available ? "OK" : "NOK"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </label>
           )}
           <label className="space-y-2 md:col-span-2">
-            <span className="form-label">Technologies</span>
+            <span className="form-label">Tehnologii</span>
             <input
               className="input-field"
               value={(profile.technologies || []).join(", ")}
@@ -303,7 +518,7 @@ export default function Profile() {
           </label>
         </div>
         <button className="btn-primary" onClick={updateProfile}>
-          Save Profile
+          Salvează profilul
         </button>
         {status && <p className="muted text-sm">{status}</p>}
       </div>

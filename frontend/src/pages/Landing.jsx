@@ -6,50 +6,50 @@ export default function Landing() {
     <div className="space-y-12 fade-up">
       <section className="hero">
         <div className="space-y-6">
-          <p className="eyebrow">Voice-first interview lab</p>
-          <h1 className="hero-title">Practice interviews that feel real, not scripted.</h1>
+          <p className="eyebrow">Laborator de interviu orientat pe voce</p>
+          <h1 className="hero-title">Exersează interviuri care par reale, nu scriptate.</h1>
           <p className="hero-subtitle">
-            Train with adaptive AI, instant vocal feedback, and multimodal behavioral
-            insight. Designed for students who want to sound confident under pressure.
+            Antrenează-te cu AI adaptiv, feedback vocal instant și insight comportamental
+            multimodal. Gândit pentru studenți care vor să sune încrezător sub presiune.
           </p>
           <div className="flex flex-wrap gap-3">
             <Link className="btn-primary" to="/login">
-              Start a Session
+              Începe o sesiune
             </Link>
             <Link className="btn-ghost" to="/arena">
-              Enter the Arena
+              Intră în Arena
             </Link>
           </div>
           <div className="flex flex-wrap gap-3">
             <span className="pill">Whisper STT</span>
             <span className="pill">TTS feedback</span>
-            <span className="pill">Emotion insights</span>
+            <span className="pill">Insight emoțional</span>
           </div>
         </div>
 
         <div className="panel space-y-4">
-          <span className="tag">Live Session Preview</span>
-          <h2 className="section-title">Today&rsquo;s focus</h2>
+          <span className="tag">Previzualizare sesiune live</span>
+          <h2 className="section-title">Focusul de azi</h2>
           <p className="muted">
-            Behavioral + technical drills, with tone calibrated to stress signals and
-            hesitation patterns.
+            Exerciții comportamentale + tehnice, cu ton calibrat pe semnale de stres și
+            tipare de ezitare.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="metric">
-              <span>Session mode</span>
-              <strong>Voice</strong>
+              <span>Mod sesiune</span>
+              <strong>Voce</strong>
             </div>
             <div className="metric">
-              <span>Latency target</span>
+              <span>Țintă latență</span>
               <strong>&lt; 2s</strong>
             </div>
             <div className="metric">
-              <span>Emotion signals</span>
-              <strong>Stress, Calm</strong>
+              <span>Semnale emoționale</span>
+              <strong>Stres, Calm</strong>
             </div>
             <div className="metric">
-              <span>Report format</span>
-              <strong>JSON + tips</strong>
+              <span>Format raport</span>
+              <strong>JSON + recomandări</strong>
             </div>
           </div>
         </div>
@@ -57,24 +57,23 @@ export default function Landing() {
 
       <section className="grid gap-6 md:grid-cols-3 stagger">
         <div className="surface-card">
-          <h3 className="section-title">Voice-first arena</h3>
+          <h3 className="section-title">Arena orientată pe voce</h3>
           <p className="muted" style={{ color: "var(--text)" }}>
-            Speak naturally; the AI responds with realistic pacing and follow-up
-            questions.
+            Vorbește natural; AI-ul răspunde cu ritm realist și întrebări de follow-up.
           </p>
         </div>
         <div className="surface-card">
-          <h3 className="section-title">Multimodal coaching</h3>
+          <h3 className="section-title">Coaching multimodal</h3>
           <p className="muted" style={{ color: "var(--text)" }}>
-            We analyze micro-emotions and hesitation to adapt the coaching style in
-            real time.
+            Analizăm micro-emoții și ezitări pentru a adapta stilul de coaching în timp
+            real.
           </p>
         </div>
         <div className="surface-card">
-          <h3 className="section-title">Technical sandbox</h3>
+          <h3 className="section-title">Sandbox tehnic</h3>
           <p className="muted" style={{ color: "var(--text)" }}>
-            Solve coding prompts in a safe container while the coach scores clarity
-            and correctness.
+            Rezolvi prompturi de coding într-un container sigur, în timp ce coach-ul
+            evaluează claritatea și corectitudinea.
           </p>
         </div>
       </section>
@@ -82,14 +81,14 @@ export default function Landing() {
       <section className="surface-card fade-up">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-2">
-            <h2 className="section-title">Get a structured interview report</h2>
+            <h2 className="section-title">Primește un raport structurat al interviului</h2>
             <p className="muted">
-              Walk away with a session summary, ideal answers, and a behavioral trend
-              timeline.
+              Pleci cu un rezumat al sesiunii, răspunsuri ideale și o cronologie a
+              tendințelor comportamentale.
             </p>
           </div>
           <Link className="btn-secondary" to="/profile">
-            Configure Profile
+            Configurează profilul
           </Link>
         </div>
       </section>

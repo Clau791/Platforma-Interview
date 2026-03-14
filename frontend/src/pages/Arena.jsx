@@ -6,6 +6,55 @@ import VideoSnapshot from "../components/VideoSnapshot";
 import { apiRequest } from "../lib/api";
 import { getToken } from "../lib/auth";
 
+const GEMINI_NATIVE_TAGS = ["native-audio", "native_audio", "native-dialog", "native_dialog"];
+const MALE_VOICE_HINTS = ["male", "mascul", "barbat", "man", "onyx", "puck", "alex", "daniel", "radu"];
+const FEMALE_VOICE_HINTS = ["female", "fem", "femeie", "woman", "nova", "kore", "ana", "ioana", "alina"];
+const PLACEHOLDER_KEYS = ["", "change_me", "your_api_key", "your_api_key_here"];
+
+function isGeminiNativeModel(model) {
+  const name = (model || "").toLowerCase();
+  return GEMINI_NATIVE_TAGS.some((tag) => name.includes(tag));
+}
+
+function pickRomanianVoice(preferredGender = "female") {
+  if (!("speechSynthesis" in window)) {
+    return null;
+  }
+  const voices = window.speechSynthesis.getVoices() || [];
+  if (!voices.length) {
+    return null;
+  }
+  const gender = String(preferredGender || "female").toLowerCase();
+  const hints = gender === "male" ? MALE_VOICE_HINTS : FEMALE_VOICE_HINTS;
+  const oppositeHints = gender === "male" ? FEMALE_VOICE_HINTS : MALE_VOICE_HINTS;
+  const scored = voices.map((voice) => {
+    const haystack = `${voice.name || ""} ${voice.voiceURI || ""}`.toLowerCase();
+    let score = 0;
+    if (hints.some((hint) => haystack.includes(hint))) {
+      score += 10;
+    }
+    if (oppositeHints.some((hint) => haystack.includes(hint))) {
+      score -= 4;
+    }
+    if (String(voice.lang || "").toLowerCase().startsWith("ro")) {
+      score += 4;
+    }
+    if (voice.default) {
+      score += 1;
+    }
+    return { voice, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  if (scored[0]) {
+    return scored[0].voice;
+  }
+  return (
+    voices.find((voice) => String(voice.lang || "").toLowerCase().startsWith("ro")) ||
+    voices.find((voice) => voice.default) ||
+    voices[0]
+  );
+}
+
 
 export default function Arena() {
   const [sessionId, setSessionId] = useState(null);
@@ -18,8 +67,66 @@ export default function Arena() {
   const [profileStatus, setProfileStatus] = useState("");
   const [sessionHistory, setSessionHistory] = useState([]);
   const [avatarGender, setAvatarGender] = useState("female");
+  const [voiceGender, setVoiceGender] = useState("female");
+  const [ttsVoice, setTtsVoice] = useState("");
   const [profileName, setProfileName] = useState("");
   const [showAvatar, setShowAvatar] = useState(false);
+  const [lastAudioUrl, setLastAudioUrl] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const useGeminiLive = aiProvider === "gemini" && isGeminiNativeModel(aiModel);
+
+  const hasRealOpenAiKey = (key) =>
+    Boolean(key) && !PLACEHOLDER_KEYS.includes(String(key || "").trim().toLowerCase());
+
+  const normalizeSessionId = (value) => {
+    if (!value) {
+      return null;
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "object" && typeof value.id === "string") {
+      return value.id;
+    }
+    return null;
+  };
+
+  const speakBrowserText = (text) => {
+    if (!text || !("speechSynthesis" in window)) {
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voice = pickRomanianVoice(voiceGender || avatarGender || "female");
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang || "ro-RO";
+    } else {
+      utterance.lang = "ro-RO";
+    }
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const playDataAudio = async (ttsAudioUrl) => {
+    if (!ttsAudioUrl) {
+      return false;
+    }
+    try {
+      const audio = new Audio(ttsAudioUrl);
+      await audio.play();
+      setLastAudioUrl(ttsAudioUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+    window.speechSynthesis.getVoices();
+  }, []);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -29,13 +136,37 @@ export default function Arena() {
       }
       try {
         const data = await apiRequest("/profile", { method: "GET" });
-        setAiProvider(data.preferences?.aiProvider || "openai");
-        setAiModel(data.preferences?.aiModel || "");
-        setAiTtsModel(data.preferences?.aiTtsModel || "");
-        setAvatarGender(data.preferences?.interviewGender || "female");
+        const prefs = data.preferences || {};
+        let provider = prefs.aiProvider || "openai";
+        const openaiKey = prefs.openaiApiKey || "";
+        const geminiKey = prefs.geminiApiKey || "";
+        if (provider === "openai" && !hasRealOpenAiKey(openaiKey) && geminiKey) {
+          provider = "gemini";
+          setProfileStatus(
+            "Providerul a fost trecut automat pe Gemini deoarece cheia OpenAI este lipsă/invalidă."
+          );
+        } else {
+          setProfileStatus("");
+        }
+        const rawModel = prefs.aiModel || "";
+        const normalizedModel =
+          provider === "gemini" && rawModel && !String(rawModel).toLowerCase().includes("gemini")
+            ? ""
+            : rawModel;
+        setAiProvider(provider);
+        setAiModel(normalizedModel);
+        setAiTtsModel(
+          provider === "gemini"
+            ? prefs.aiTtsModel || "gemini-2.5-flash-preview-tts"
+            : prefs.aiTtsModel || ""
+        );
+        setAvatarGender(prefs.interviewGender || "female");
+        setVoiceGender(prefs.voiceGender || prefs.interviewGender || "female");
+        setTtsVoice(prefs.ttsVoice || "");
         setProfileName(data.full_name || "");
+        setGeminiApiKey(geminiKey);
       } catch (error) {
-        setProfileStatus("Could not load profile preferences.");
+        setProfileStatus("Nu am putut încărca preferințele profilului.");
       }
     };
     loadPreferences();
@@ -58,14 +189,14 @@ export default function Arena() {
       setStatus("Autentifică-te pentru a crea o sesiune.");
       return;
     }
-    setStatus("Creating session...");
+    setStatus("Creez sesiunea...");
     try {
       const data = await apiRequest("/sessions", {
         method: "POST",
         body: { config: { mode: "voice", difficulty: "medium" } }
       });
       setSessionId(data.id);
-      setStatus("Session ready.");
+      setStatus("Sesiunea este pregătită.");
       fetchHistory();
       return data.id;
     } catch (error) {
@@ -73,12 +204,12 @@ export default function Arena() {
     }
   };
 
-  const startSession = async () => {
+  const startSession = async (targetSessionId = null) => {
     if (!getToken()) {
       setStatus("Autentifică-te pentru a porni sesiunea.");
       return;
     }
-    let activeSessionId = sessionId;
+    let activeSessionId = normalizeSessionId(targetSessionId) || normalizeSessionId(sessionId);
     if (!activeSessionId) {
       const newId = await createSession();
       if (!newId) {
@@ -86,14 +217,59 @@ export default function Arena() {
       }
       activeSessionId = newId;
     }
-    setStatus("Starting session...");
+    if (typeof activeSessionId !== "string") {
+      setStatus("ID-ul sesiunii este invalid. Reîncearcă după creare sesiune.");
+      return;
+    }
+    setAssistantText("");
+    setStatus("Pornesc sesiunea...");
     try {
       await apiRequest(`/sessions/${activeSessionId}/start`, { method: "POST" });
       setSessionId(activeSessionId);
-      const greeting = `Hello ${profileName || "there"}, how are you today?`;
-      setAssistantText(greeting);
+
+      if (useGeminiLive) {
+        // In Gemini Live we let the live websocket deliver the greeting/question.
+        // Avoid duplicate welcome voices from mixed pipelines.
+        setShowAvatar(true);
+        setStatus("Sesiunea a pornit. Fluxul vocal Gemini Live este activ.");
+        fetchHistory();
+        return;
+      }
+
+      const fallbackWelcome = `Bună, ${profileName || "candidat"}! Începem interviul.`;
+      setAssistantText(fallbackWelcome);
+
+      try {
+        const welcomeFormData = new FormData();
+        welcomeFormData.append("ai_provider", aiProvider);
+        if (aiModel) welcomeFormData.append("ai_model", aiModel);
+        if (aiTtsModel) welcomeFormData.append("ai_tts_model", aiTtsModel);
+        if (ttsVoice) welcomeFormData.append("tts_voice", ttsVoice);
+        if (voiceGender) welcomeFormData.append("voice_gender", voiceGender);
+        if (avatarGender) welcomeFormData.append("interview_gender", avatarGender);
+        if (profileName) welcomeFormData.append("full_name", profileName);
+
+        const welcome = await apiRequest(`/sessions/${activeSessionId}/welcome`, {
+          method: "POST",
+          body: welcomeFormData
+        });
+        const welcomeText =
+          (welcome?.assistant_text || "").trim() || fallbackWelcome;
+        setAssistantText(welcomeText);
+        const played = await playDataAudio(welcome?.tts_audio_url || "");
+        if (!played) {
+          speakBrowserText(welcomeText);
+        }
+      } catch {
+        // Keep session start resilient even if welcome generation fails.
+        speakBrowserText(fallbackWelcome);
+      }
       setShowAvatar(true);
-      setStatus("Session started.");
+      setStatus(
+        useGeminiLive
+          ? "Sesiunea a pornit. Fluxul vocal Gemini Live este activ."
+          : "Sesiunea a pornit. Captura vocală automată este activă."
+      );
       fetchHistory();
     } catch (error) {
       setStatus(error.message);
@@ -108,28 +284,33 @@ export default function Arena() {
     <div className="space-y-8 fade-up">
       <header className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
-          <h1 className="hero-title">The Arena</h1>
+          <h1 className="hero-title">Arena</h1>
           <p className="hero-subtitle">
-            Voice-first interview simulation with emotion tracking and technical drills.
+            Simulare de interviu orientată pe voce, cu urmărire emoții și exerciții tehnice.
           </p>
         </div>
         <div className="surface-card space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <button className="btn-primary" onClick={createSession}>
-              Create Session
+              Creează sesiune
             </button>
-            <button className="btn-ghost" onClick={startSession}>
-              Start Session
+            <button className="btn-ghost" onClick={() => startSession()}>
+              Pornește sesiunea
             </button>
           </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="pill">Mode: Voice</span>
-          {sessionId && <span className="muted">Session: {sessionId}</span>}
+          <span className="pill">Mod: Voce</span>
+          {sessionId && <span className="muted">Sesiune: {sessionId}</span>}
         </div>
         <div className="flex flex-col gap-1 text-xs">
-          <span className="muted">AI provider: {aiProvider}</span>
+          <span className="muted">Provider AI: {aiProvider}</span>
           <span className="muted">
-            {sessionHistory.length > 0 ? `Sessions: ${sessionHistory.length}` : ""}
+            Flux voce: {useGeminiLive ? "Gemini Live" : "Standard backend"}
+          </span>
+          <span className="muted">Model: {aiModel || "implicit"}</span>
+          <span className="muted">Voce TTS: {ttsVoice || `auto (${voiceGender || "female"})`}</span>
+          <span className="muted">
+            {sessionHistory.length > 0 ? `Sesiuni: ${sessionHistory.length}` : ""}
           </span>
           {profileStatus && <span className="muted">{profileStatus}</span>}
         </div>
@@ -138,7 +319,7 @@ export default function Arena() {
 
       <section className="panel space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="section-title">Voice Loop & Emotion Tracking</h2>
+          <h2 className="section-title">Flux vocal și urmărire emoții</h2>
           <div className="pill">Live</div>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -148,7 +329,18 @@ export default function Arena() {
               aiProvider={aiProvider}
               aiModel={aiModel}
               aiTtsModel={aiTtsModel}
-              onResponse={(data) => setAssistantText(data.assistant_text)}
+              autoRecord={Boolean(showAvatar && sessionId)}
+              geminiApiKey={geminiApiKey}
+              interviewGender={avatarGender}
+              voiceGender={voiceGender}
+              ttsVoice={ttsVoice}
+              profileName={profileName}
+              onResponse={(data) => {
+                setAssistantText(data.assistant_text);
+                if (data.tts_audio_url) {
+                  setLastAudioUrl(data.tts_audio_url);
+                }
+              }}
             />
             {showAvatar && (
               <div className="flex items-center gap-3 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-3">
@@ -161,16 +353,27 @@ export default function Arena() {
                 </div>
                 <div className="text-sm">
                   <p className="font-semibold text-slate-900">
-                    {avatarGender === "male" ? "Coach (Male)" : "Coach (Female)"}
+                    {avatarGender === "male" ? "Intervievator (Bărbat)" : "Intervievator (Femeie)"}
                   </p>
-                  <p className="muted">Live interviewer avatar</p>
+                  <p className="muted">Avatar intervievator live</p>
                 </div>
               </div>
             )}
             {assistantText && (
               <div className="surface-card">
-                <p className="muted text-sm">Coach response</p>
+                <p className="muted text-sm">Răspuns intervievator</p>
                 <p className="mt-2">{assistantText}</p>
+                {lastAudioUrl && (
+                  <button
+                    className="btn-ghost mt-3 text-xs"
+                    onClick={async () => {
+                      const audio = new Audio(lastAudioUrl);
+                      await audio.play();
+                    }}
+                  >
+                    Redă din nou vocea
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -178,11 +381,11 @@ export default function Arena() {
             <VideoSnapshot sessionId={sessionId} onEmotion={(data) => setEmotion(data)} />
             {emotion && (
               <div className="surface-card text-sm">
-                <span className="muted">Current emotion</span>
+                <span className="muted">Emoție curentă</span>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="pill">{emotion.emotion}</span>
                   <span className="muted">
-                    {Math.round(emotion.confidence * 100)}% confidence
+                    {Math.round(emotion.confidence * 100)}% încredere
                   </span>
                 </div>
                 {emotion.raw_scores && (
@@ -197,19 +400,19 @@ export default function Arena() {
       </section>
 
       <section className="panel space-y-4">
-        <h2 className="section-title">Technical Challenge</h2>
+        <h2 className="section-title">Provocare tehnică</h2>
         <CodeEditor sessionId={sessionId} />
       </section>
 
       <section className="panel space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="section-title">Session History</h2>
+          <h2 className="section-title">Istoric sesiuni</h2>
           <button className="btn-ghost text-sm" onClick={fetchHistory}>
-            Refresh
+            Reîncarcă
           </button>
         </div>
         {sessionHistory.length === 0 ? (
-          <p className="muted text-sm">No sessions yet.</p>
+          <p className="muted text-sm">Nu există sesiuni încă.</p>
         ) : (
           <div className="space-y-2">
             {sessionHistory.map((item) => (
@@ -223,13 +426,13 @@ export default function Arena() {
                     <span className="muted">{item.id}</span>
                   </div>
                   <div className="muted">
-                    Started: {item.started_at ? new Date(item.started_at).toLocaleString() : "-"} | Ended:{" "}
+                    Start: {item.started_at ? new Date(item.started_at).toLocaleString() : "-"} | Final:{" "}
                     {item.ended_at ? new Date(item.ended_at).toLocaleString() : "-"}
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2 text-xs">
                   <div className="muted">
-                    Created: {item.created_at ? new Date(item.created_at).toLocaleString() : "-"}
+                    Creată: {item.created_at ? new Date(item.created_at).toLocaleString() : "-"}
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -239,19 +442,18 @@ export default function Arena() {
                         setShowAvatar(false);
                         setAssistantText("");
                         setEmotion(null);
-                        setStatus("Session loaded. Click Start Session to resume.");
+                        setStatus("Sesiunea a fost încărcată. Apasă „Pornește sesiunea” pentru reluare.");
                       }}
                     >
-                      Load
+                      Încarcă
                     </button>
                     <button
                       className="btn-secondary text-xs"
                       onClick={() => {
-                        setSessionId(item.id);
-                        startSession();
+                        startSession(item.id);
                       }}
                     >
-                      Resume
+                      Reia
                     </button>
                   </div>
                 </div>

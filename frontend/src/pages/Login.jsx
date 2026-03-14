@@ -18,7 +18,7 @@ export default function Login() {
   const [mode, setMode] = useState("login");
 
   const handleLogin = async () => {
-    setStatus("Logging in...");
+    setStatus("Autentificare...");
     setFormError("");
     try {
       const data = await apiRequest("/auth/login", {
@@ -26,7 +26,7 @@ export default function Login() {
         body: { email, password }
       });
       setToken(data.access_token);
-      setStatus("Authenticated.");
+      setStatus("Autentificat.");
       navigate("/arena");
     } catch (error) {
       setStatus(error.message);
@@ -35,7 +35,7 @@ export default function Login() {
   };
 
   const handleRegister = async () => {
-    setStatus("Registering...");
+    setStatus("Înregistrare...");
     setFormError("");
 
     if (password.length < 8) {
@@ -61,7 +61,7 @@ export default function Login() {
         }
       });
       setToken(data.access_token);
-      setStatus("Registered.");
+      setStatus("Cont creat.");
       navigate("/arena");
     } catch (error) {
       setStatus(error.message);
@@ -80,38 +80,37 @@ export default function Login() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
       <div className="space-y-4 fade-up">
-        <h1 className="hero-title">Welcome back.</h1>
+        <h1 className="hero-title">Bine ai revenit.</h1>
         <p className="hero-subtitle">
-          Log in to continue your interview training or create a new coaching profile.
+          Conectează-te pentru a continua antrenamentul de interviu sau creează un profil nou.
         </p>
         <div className="surface-card space-y-3">
           <p className="muted">
-            Tip: Use a real microphone and camera for the most accurate coaching
-            metrics.
+            Tip: folosește microfon și cameră reale pentru cele mai precise evaluări.
           </p>
           <div className="flex flex-wrap gap-2">
             <span className="pill">JWT Auth</span>
             <span className="pill">Voice-first</span>
-            <span className="pill">Progress reports</span>
+            <span className="pill">Rapoarte progres</span>
           </div>
         </div>
       </div>
 
       <div className="surface-card space-y-5 fade-up">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="section-title">Login / Register</h2>
+          <h2 className="section-title">Autentificare / Înregistrare</h2>
           <div className="flex gap-2">
             <button
               className={mode === "login" ? "pill" : "pill ghost"}
               onClick={() => switchMode("login")}
             >
-              Login
+              Conectare
             </button>
             <button
               className={mode === "register" ? "pill" : "pill ghost"}
               onClick={() => switchMode("register")}
             >
-              Register
+              Înregistrare
             </button>
           </div>
         </div>
@@ -126,7 +125,7 @@ export default function Login() {
             />
           </label>
           <label className="space-y-2">
-            <span className="form-label">Password</span>
+            <span className="form-label">Parolă</span>
             <input
               type="password"
               className="input-field"
@@ -137,7 +136,7 @@ export default function Login() {
           {mode === "register" && (
             <>
               <label className="space-y-2 md:col-span-2">
-                <span className="form-label">Full name</span>
+                <span className="form-label">Nume complet</span>
                 <input
                   className="input-field"
                   placeholder="Nume și prenume"
@@ -146,7 +145,7 @@ export default function Login() {
                 />
               </label>
               <label className="space-y-2">
-                <span className="form-label">Experience level</span>
+                <span className="form-label">Nivel experiență</span>
                 <select
                   className="input-field"
                   value={experienceLevel}
@@ -158,7 +157,7 @@ export default function Login() {
                 </select>
               </label>
               <label className="space-y-2">
-                <span className="form-label">Target role</span>
+                <span className="form-label">Rol țintă</span>
                 <input
                   className="input-field"
                   value={targetRole}
@@ -166,7 +165,7 @@ export default function Login() {
                 />
               </label>
               <label className="space-y-2 md:col-span-2">
-                <span className="form-label">Technologies (comma separated)</span>
+                <span className="form-label">Tehnologii (separate prin virgulă)</span>
                 <input
                   className="input-field"
                   value={technologies}
@@ -179,11 +178,11 @@ export default function Login() {
         <div className="flex flex-wrap gap-2">
           {mode === "login" ? (
             <button className="btn-primary" onClick={handleLogin}>
-              Login
+              Conectare
             </button>
           ) : (
             <button className="btn-primary" onClick={handleRegister}>
-              Register
+              Înregistrare
             </button>
           )}
         </div>

@@ -13,17 +13,17 @@ export default function App() {
         <header className="app-header">
           <Link className="logo" to="/">
             <span className="logo-badge">AI</span>
-            <span>Interview Coach</span>
+            <span>Coach Interviu</span>
           </Link>
           <nav className="nav-links">
             <Link className="nav-link" to="/arena">
               Arena
             </Link>
             <Link className="nav-link" to="/profile">
-              Profile
+              Profil
             </Link>
             <Link className="nav-link" to="/login">
-              Login
+              Autentificare
             </Link>
           </nav>
         </header>

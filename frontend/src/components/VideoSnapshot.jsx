@@ -19,7 +19,7 @@ export default function VideoSnapshot({ sessionId, onEmotion }) {
         videoRef.current.srcObject = stream;
       }
       setIsRunning(true);
-      setStatus("Emotion capture running...");
+      setStatus("Captura emoțiilor rulează...");
 
       intervalRef.current = setInterval(async () => {
         const canvas = document.createElement("canvas");
@@ -52,13 +52,13 @@ export default function VideoSnapshot({ sessionId, onEmotion }) {
               setNeedAuth(true);
               setStatus("Autentificare necesară pentru emotion capture.");
             } else {
-              setStatus(msg || "Emotion capture failed.");
+              setStatus(msg || "Captura emoțiilor a eșuat.");
             }
           }
         }, "image/jpeg");
       }, 4000);
     } catch (error) {
-      setStatus("Camera permission denied.");
+      setStatus("Accesul la cameră a fost refuzat.");
     }
   };
 
@@ -74,7 +74,7 @@ export default function VideoSnapshot({ sessionId, onEmotion }) {
       video.srcObject = null;
     }
     setIsRunning(false);
-    setStatus("Emotion capture stopped.");
+    setStatus("Captura emoțiilor este oprită.");
   };
 
   return (
@@ -85,14 +85,14 @@ export default function VideoSnapshot({ sessionId, onEmotion }) {
           onClick={startCapture}
           disabled={isRunning || !sessionId}
         >
-          Start Emotion Capture
+          Pornește captura emoțiilor
         </button>
         <button
           className="btn-ghost"
           onClick={stopCapture}
           disabled={!isRunning}
         >
-          Stop
+          Oprește
         </button>
       </div>
       <video

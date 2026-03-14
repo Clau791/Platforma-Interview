@@ -61,3 +61,5 @@
 - Added AI model selectors per provider (OpenAI: gpt-4o/mini/3.5, Gemini: 1.5 flash/pro) and TTS model selector (OpenAI) in Profile; preferences are passed to audio pipeline via context, and AudioRecorder now submits ai_model/ai_tts_model.
 - Adjusted AI model input to free-text (no fixed list) so users can set only models supported by their API key; leaving blank uses backend defaults.
 - Added models validate endpoint that uses user-stored API keys, caches available models per provider in profile preferences, and “Validate key” buttons in Profile (OpenAI/Gemini) to fetch and persist available models; UI shows all fetched models (datalist + scrollable chips).
+- Tightened Gemini model filtering to native dialog/audio variants only in model discovery endpoint.
+- Added interview vocal UX improvements: automatic voice greeting on `Start Session` (backend `/sessions/{id}/welcome` + frontend autoplay with speech-synthesis fallback) and replay button for last TTS response.

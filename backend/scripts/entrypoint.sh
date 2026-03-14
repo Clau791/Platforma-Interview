@@ -18,4 +18,9 @@ for attempt in $(seq 1 "$max_retries"); do
   fi
 done
 
+if [[ "${UVICORN_RELOAD:-0}" == "1" ]]; then
+  echo "[entrypoint] starting uvicorn with --reload"
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+fi
+
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000

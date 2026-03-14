@@ -5,12 +5,12 @@ import { apiRequest } from "../lib/api";
 
 
 export default function CodeEditor({ sessionId }) {
-  const [code, setCode] = useState("// write your solution here\n");
+  const [code, setCode] = useState("// scrie soluția ta aici\n");
   const [output, setOutput] = useState("");
   const [status, setStatus] = useState("");
 
   const runCode = async () => {
-    setStatus("Running...");
+    setStatus("Rulez codul...");
     try {
       const data = await apiRequest(`/sessions/${sessionId}/code/execute`, {
         method: "POST",
@@ -19,8 +19,8 @@ export default function CodeEditor({ sessionId }) {
           source_code: code
         }
       });
-      setOutput(data.stderr || data.stdout || "No output");
-      setStatus("Done");
+      setOutput(data.stderr || data.stdout || "Fără output");
+      setStatus("Finalizat");
     } catch (error) {
       setStatus(error.message);
     }
@@ -41,7 +41,7 @@ export default function CodeEditor({ sessionId }) {
         onClick={runCode}
         disabled={!sessionId}
       >
-        Run Code
+        Rulează codul
       </button>
       {status && <p className="muted text-sm">{status}</p>}
       {output && <pre className="surface-card text-sm whitespace-pre-wrap">{output}</pre>}

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import exists, or_, select
@@ -56,6 +57,11 @@ def start_session(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    try:
+        session_id = str(UUID(session_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid session id") from exc
+
     session = (
         db.query(InterviewSession)
         .filter(InterviewSession.id == session_id, InterviewSession.user_id == current_user.id)
