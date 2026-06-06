@@ -11,10 +11,12 @@ export default function App() {
     <BrowserRouter>
       <div className="app-shell">
         <header className="app-header">
-          <Link className="logo" to="/">
-            <span className="logo-badge">AI</span>
-            <span>Coach Interviu</span>
-          </Link>
+          <div className="logo-box">
+            <Link className="logo" to="/">
+              <span className="logo-badge">AI</span>
+              <span>Coach Interviu</span>
+            </Link>
+          </div>
           <nav className="nav-links">
             <Link className="nav-link" to="/arena">
               Arena

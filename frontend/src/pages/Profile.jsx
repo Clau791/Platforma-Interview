@@ -6,9 +6,8 @@ import { apiRequest } from "../lib/api";
 export default function Profile() {
   const [profile, setProfile] = useState(null);
   const [status, setStatus] = useState("");
-  const [aiProvider, setAiProvider] = useState("openai");
+  const [aiProvider] = useState("gemini");
   const [fullName, setFullName] = useState("");
-  const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [voiceGender, setVoiceGender] = useState("female");
   const [interviewGender, setInterviewGender] = useState("female");
@@ -20,7 +19,6 @@ export default function Profile() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [voiceProbeLoading, setVoiceProbeLoading] = useState(false);
   const [voiceProbeResults, setVoiceProbeResults] = useState([]);
-  const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
   const previewAudioRef = useRef(null);
 
   useEffect(() => {
@@ -31,17 +29,14 @@ export default function Profile() {
         setProfile(data);
         setFullName(data.full_name || "");
         const preferences = data.preferences || {};
-        const provider = preferences.aiProvider || "openai";
-        setAiProvider(provider);
-        setOpenaiApiKey(preferences.openaiApiKey || "");
         setGeminiApiKey(preferences.geminiApiKey || "");
         setVoiceGender(preferences.voiceGender || "female");
         setInterviewGender(preferences.interviewGender || "female");
         setTtsVoice(preferences.ttsVoice || "");
         setAiModel(preferences.aiModel || "");
         setAiTtsModel(preferences.aiTtsModel || "");
-        if (preferences.availableModels && preferences.availableModels[provider]) {
-          setAvailableModels(preferences.availableModels[provider]);
+        if (preferences.availableModels && preferences.availableModels.gemini) {
+          setAvailableModels(preferences.availableModels.gemini);
         } else {
           setAvailableModels([]);
         }
@@ -77,7 +72,7 @@ export default function Profile() {
   const validateKey = async () => {
     setLoadingModels(true);
     setStatus("Validez cheia și încarc modelele...");
-    const key = aiProvider === "openai" ? openaiApiKey : geminiApiKey;
+    const key = geminiApiKey;
     try {
       const data = await apiRequest(`/models/validate?provider=${aiProvider}`, {
         method: "POST",
@@ -93,11 +88,7 @@ export default function Profile() {
       if (data.selected_tts_model) {
         setAiTtsModel(data.selected_tts_model);
       }
-      // also persist key by updating local prefs fields
-      if (aiProvider === "openai" && key) {
-        setOpenaiApiKey(key);
-      }
-      if (aiProvider === "gemini" && key) {
+      if (key) {
         setGeminiApiKey(key);
       }
       setProfile((prev) => {
@@ -113,8 +104,7 @@ export default function Profile() {
           availableModels: nextAvailable,
           aiModel: data.selected_model || aiModel,
           aiTtsModel: data.selected_tts_model || aiTtsModel,
-          ...(aiProvider === "openai" && key ? { openaiApiKey: key } : {}),
-          ...(aiProvider === "gemini" && key ? { geminiApiKey: key } : {}),
+          ...(key ? { geminiApiKey: key } : {}),
         };
         return { ...prev, preferences: nextPrefs };
       });
@@ -141,8 +131,7 @@ export default function Profile() {
           full_name: fullName,
           preferences: {
             ...(profile.preferences || {}),
-            aiProvider,
-            openaiApiKey,
+            aiProvider: "gemini",
             geminiApiKey,
             voiceGender,
             interviewGender,
@@ -155,8 +144,6 @@ export default function Profile() {
       setProfile(data);
       setFullName(data.full_name || fullName);
       const preferences = data.preferences || {};
-      setAiProvider(preferences.aiProvider || aiProvider);
-      setOpenaiApiKey(preferences.openaiApiKey || "");
       setGeminiApiKey(preferences.geminiApiKey || "");
       setVoiceGender(preferences.voiceGender || voiceGender);
       setInterviewGender(preferences.interviewGender || interviewGender);
@@ -188,52 +175,6 @@ export default function Profile() {
       setVoiceProbeResults([]);
     } finally {
       setVoiceProbeLoading(false);
-    }
-  };
-
-  const previewSelectedVoice = async () => {
-    setVoicePreviewLoading(true);
-    setStatus("Generez preview de voce...");
-    try {
-      const provider = aiProvider || "openai";
-      const providerKey = provider === "gemini" ? geminiApiKey : openaiApiKey;
-      const sampleText = fullName
-        ? `Bună, ${fullName}! Acesta este un preview de voce pentru interviu.`
-        : "Bună! Acesta este un preview de voce pentru interviu.";
-
-      const data = await apiRequest("/models/voice-preview", {
-        method: "POST",
-        body: {
-          provider,
-          api_key: providerKey || null,
-          ai_tts_model: aiTtsModel || null,
-          tts_voice: ttsVoice || null,
-          voice_gender: voiceGender || null,
-          interview_gender: interviewGender || null,
-          text: sampleText,
-        },
-      });
-
-      if (!data?.tts_audio_url) {
-        setStatus("Nu am primit audio pentru preview.");
-        return;
-      }
-
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
-        previewAudioRef.current = null;
-      }
-
-      const audio = new Audio(data.tts_audio_url);
-      previewAudioRef.current = audio;
-      await audio.play();
-      setStatus(
-        `Preview voce redat (${data.resolved_voice || "auto"} | ${data.resolved_tts_model || "implicit"}).`
-      );
-    } catch (error) {
-      setStatus(error.message);
-    } finally {
-      setVoicePreviewLoading(false);
     }
   };
 
@@ -293,17 +234,10 @@ export default function Profile() {
               }
             />
           </label>
-          <label className="space-y-2">
+          <div className="space-y-2">
             <span className="form-label">Provider AI</span>
-            <select
-              className="input-field"
-              value={aiProvider}
-              onChange={(event) => setAiProvider(event.target.value)}
-            >
-              <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini</option>
-            </select>
-          </label>
+            <div className="input-field bg-[color:var(--surface-alt)]">Gemini</div>
+          </div>
           <label className="space-y-2">
             <span className="form-label">Model AI</span>
             <input
@@ -334,73 +268,18 @@ export default function Profile() {
               </div>
             )}
           </label>
-          {aiProvider === "openai" && (
-            <label className="space-y-2">
-              <span className="form-label">OpenAI API Key</span>
-              <div className="flex gap-2">
-                <input
-                  className="input-field flex-1"
-                  type="password"
-                  placeholder="Adaugă cheia OpenAI API"
-                  value={openaiApiKey}
-                  onChange={(event) => setOpenaiApiKey(event.target.value)}
-                />
-                <button type="button" className="btn-ghost text-xs whitespace-nowrap" onClick={validateKey} disabled={loadingModels}>
-                  Validează cheia
-                </button>
-              </div>
-              <span className="muted text-xs">Cheia este stocată în preferințele profilului.</span>
-            </label>
-          )}
           <label className="space-y-2">
             <span className="form-label">Tip voce</span>
-            <div className="flex items-center gap-2">
-              <select
-                className="input-field flex-1"
-                value={voiceGender}
-                onChange={(event) => setVoiceGender(event.target.value)}
-              >
-                <option value="female">Feminin</option>
-                <option value="male">Masculin</option>
-              </select>
-              <button
-                type="button"
-                className="btn-ghost inline-flex h-10 w-10 items-center justify-center rounded-lg"
-                onClick={previewSelectedVoice}
-                disabled={voicePreviewLoading}
-                title="Redă preview voce"
-                aria-label="Redă preview voce"
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  className="h-4 w-4"
-                  fill="currentColor"
-                >
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
-            </div>
-            <span className="muted text-xs">
-              Folosit pentru vocea TTS (OpenAI: female→nova, male→onyx).
-            </span>
+            <select
+              className="input-field"
+              value={voiceGender}
+              onChange={(event) => setVoiceGender(event.target.value)}
+            >
+              <option value="female">Feminin</option>
+              <option value="male">Masculin</option>
+            </select>
+            <span className="muted text-xs">Genul vocii intervievatorului Gemini Live.</span>
           </label>
-          {aiProvider === "openai" && (
-            <label className="space-y-2">
-              <span className="form-label">Model TTS (OpenAI)</span>
-              <select
-                className="input-field"
-                value={aiTtsModel}
-                onChange={(event) => setAiTtsModel(event.target.value)}
-              >
-                <option value="">Implicit (env)</option>
-                <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
-                <option value="tts-1">tts-1</option>
-                <option value="tts-1-hd">tts-1-hd</option>
-              </select>
-              <span className="muted text-xs">Modelul TTS folosit la răspunsuri audio.</span>
-            </label>
-          )}
           <label className="space-y-2">
             <span className="form-label">Avatar intervievator</span>
             <select
@@ -413,8 +292,7 @@ export default function Profile() {
             </select>
             <span className="muted text-xs">Controalează avatarul și vocea implicită a coach-ului.</span>
           </label>
-          {aiProvider === "gemini" && (
-            <label className="space-y-2">
+          <label className="space-y-2">
               <span className="form-label">Gemini API Key</span>
               <div className="flex gap-2">
                 <input
@@ -441,68 +319,45 @@ export default function Profile() {
                 După validare, providerul activ devine Gemini și modelul este selectat automat.
               </span>
             </label>
-          )}
-          {aiProvider === "gemini" && (
-            <label className="space-y-2">
-              <span className="form-label">Voce Gemini (TTS)</span>
-              <div className="flex items-center gap-2">
-                <select
-                  className="input-field flex-1"
-                  value={ttsVoice}
-                  onChange={(event) => setTtsVoice(event.target.value)}
-                >
-                  <option value="">Auto după gen (male/female)</option>
-                  {geminiVoices.map((voiceName) => (
-                    <option key={voiceName} value={voiceName}>
-                      {voiceName}
-                    </option>
+          <label className="space-y-2">
+            <span className="form-label">Voce Gemini (TTS)</span>
+            <select
+              className="input-field"
+              value={ttsVoice}
+              onChange={(event) => setTtsVoice(event.target.value)}
+            >
+              <option value="">Auto după gen (male/female)</option>
+              {geminiVoices.map((voiceName) => (
+                <option key={voiceName} value={voiceName}>
+                  {voiceName}
+                </option>
+              ))}
+            </select>
+            <span className="muted text-xs">
+              Dacă alegi o voce explicită, are prioritate peste setarea Female/Male.
+            </span>
+            {voiceProbeResults.length > 0 && (
+              <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">
+                <div className="flex flex-wrap gap-2">
+                  {voiceProbeResults.map((item) => (
+                    <button
+                      type="button"
+                      key={item.voice}
+                      onClick={() => {
+                        if (item.available) setTtsVoice(item.voice);
+                      }}
+                      className={`pill ${item.available ? "border border-emerald-500" : "border border-rose-400"} ${
+                        ttsVoice === item.voice ? "ring-1 ring-[color:var(--accent)]" : ""
+                      }`}
+                      title={item.error || ""}
+                    >
+                      {item.voice}: {item.available ? "OK" : "NOK"}
+                    </button>
                   ))}
-                </select>
-                <button
-                  type="button"
-                  className="btn-ghost inline-flex h-10 w-10 items-center justify-center rounded-lg"
-                  onClick={previewSelectedVoice}
-                  disabled={voicePreviewLoading}
-                  title="Redă preview voce"
-                  aria-label="Redă preview voce"
-                >
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    fill="currentColor"
-                  >
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                </button>
-              </div>
-              <span className="muted text-xs">
-                Dacă alegi o voce explicită, are prioritate peste setarea Female/Male.
-              </span>
-              {voiceProbeResults.length > 0 && (
-                <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">
-                  <div className="flex flex-wrap gap-2">
-                    {voiceProbeResults.map((item) => (
-                      <button
-                        type="button"
-                        key={item.voice}
-                        onClick={() => {
-                          if (item.available) {
-                            setTtsVoice(item.voice);
-                          }
-                        }}
-                        className={`pill ${item.available ? "border border-emerald-500" : "border border-rose-400"
-                          } ${ttsVoice === item.voice ? "ring-1 ring-[color:var(--accent)]" : ""}`}
-                        title={item.error || ""}
-                      >
-                        {item.voice}: {item.available ? "OK" : "NOK"}
-                      </button>
-                    ))}
-                  </div>
                 </div>
-              )}
-            </label>
-          )}
+              </div>
+            )}
+          </label>
           <label className="space-y-2 md:col-span-2">
             <span className="form-label">Tehnologii</span>
             <input

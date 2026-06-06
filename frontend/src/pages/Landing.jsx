@@ -20,11 +20,7 @@ export default function Landing() {
               Intră în Arena
             </Link>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <span className="pill">Whisper STT</span>
-            <span className="pill">TTS feedback</span>
-            <span className="pill">Insight emoțional</span>
-          </div>
+
         </div>
 
         <div className="panel space-y-4">
@@ -55,26 +51,30 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="grid gap-6 md:grid-cols-3 stagger">
-        <div className="surface-card">
-          <h3 className="section-title">Arena orientată pe voce</h3>
+      <section className="grid gap-6 md:grid-cols-2 stagger">
+        <div className="surface-card space-y-2">
+          <h3 className="section-title">Interviu Normal</h3>
           <p className="muted" style={{ color: "var(--text)" }}>
-            Vorbește natural; AI-ul răspunde cu ritm realist și întrebări de follow-up.
+            Conversatie vocala naturala cu AI-ul. Intrebari comportamentale si situationale,
+            analiza emotionala in timp real si feedback constructiv la final.
           </p>
+          <div className="flex flex-wrap gap-2">
+            <span className="pill">Voce</span>
+            <span className="pill">Emotii</span>
+            <span className="pill">Feedback</span>
+          </div>
         </div>
-        <div className="surface-card">
-          <h3 className="section-title">Coaching multimodal</h3>
+        <div className="surface-card space-y-2">
+          <h3 className="section-title">Interviu Tehnic</h3>
           <p className="muted" style={{ color: "var(--text)" }}>
-            Analizăm micro-emoții și ezitări pentru a adapta stilul de coaching în timp
-            real.
+            AI-ul genereaza probleme de cod adaptate nivelului tau. Scrii solutia in sandbox,
+            primesti review detaliat si hints la cerere.
           </p>
-        </div>
-        <div className="surface-card">
-          <h3 className="section-title">Sandbox tehnic</h3>
-          <p className="muted" style={{ color: "var(--text)" }}>
-            Rezolvi prompturi de coding într-un container sigur, în timp ce coach-ul
-            evaluează claritatea și corectitudinea.
-          </p>
+          <div className="flex flex-wrap gap-2">
+            <span className="pill">Cod</span>
+            <span className="pill">Review AI</span>
+            <span className="pill">Hints</span>
+          </div>
         </div>
       </section>
 

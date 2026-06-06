@@ -237,7 +237,8 @@ function speakWithBrowser(text, preferredGender = "female") {
 export default function AudioRecorder({
   sessionId,
   onResponse,
-  aiProvider = "openai",
+  onTranscript,
+  aiProvider = "gemini",
   aiModel,
   aiTtsModel,
   autoRecord = false,
@@ -246,6 +247,7 @@ export default function AudioRecorder({
   voiceGender = "female",
   ttsVoice = "",
   profileName = "",
+  systemPrompt = "",
 }) {
   const liveMode = useMemo(
     () => aiProvider === "gemini" && isGeminiNativeModel(aiModel),
@@ -266,6 +268,7 @@ export default function AudioRecorder({
   const voiceGenderRef = useRef(voiceGender);
   const ttsVoiceRef = useRef(ttsVoice);
   const profileNameRef = useRef(profileName);
+  const systemPromptRef = useRef(systemPrompt);
   const batchSocketRef = useRef(null);
   const liveSocketRef = useRef(null);
   const liveReadyRef = useRef(false);
@@ -296,6 +299,7 @@ export default function AudioRecorder({
   const liveBinaryEndianVotesRef = useRef({ le: 0, be: 0 });
   const liveBinaryProbeCountRef = useRef(0);
   const liveOutputSampleRateRef = useRef(24000);
+  const manuallyStoppedRef = useRef(false);
 
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState("");
@@ -333,7 +337,8 @@ export default function AudioRecorder({
     voiceGenderRef.current = voiceGender;
     ttsVoiceRef.current = ttsVoice;
     profileNameRef.current = profileName;
-  }, [aiProvider, aiModel, aiTtsModel, geminiApiKey, interviewGender, voiceGender, ttsVoice, profileName]);
+    systemPromptRef.current = systemPrompt;
+  }, [aiProvider, aiModel, aiTtsModel, geminiApiKey, interviewGender, voiceGender, ttsVoice, profileName, systemPrompt]);
 
   const playVoiceFallback = async (data) => {
     const ttsUrl = data?.tts_audio_url;
@@ -361,6 +366,15 @@ export default function AudioRecorder({
     } else {
       setStatus("Răspuns primit, dar browserul nu poate reda audio.");
     }
+  };
+
+  const persistMessage = (role, content) => {
+    const sid = sessionIdRef.current;
+    if (!sid || !content?.trim()) return;
+    apiRequest(`/sessions/${sid}/messages`, {
+      method: "POST",
+      body: { role, content: content.trim() },
+    }).catch(() => {});
   };
 
   const emitAssistantText = (text) => {
@@ -506,6 +520,8 @@ export default function AudioRecorder({
         pushDebug(`Gemini output transcription preview="${outputTranscription.slice(0, 80)}"`);
       }
       emitAssistantText(outputTranscription);
+      persistMessage("assistant", outputTranscription);
+      onTranscript?.({ role: "assistant", content: outputTranscription });
     }
 
     const inputTranscription =
@@ -515,6 +531,8 @@ export default function AudioRecorder({
       payload?.serverContent?.input_transcription?.text;
     if (inputTranscription) {
       setStatus("Te aud. Continuă să vorbești natural.");
+      persistMessage("user", inputTranscription);
+      onTranscript?.({ role: "user", content: inputTranscription });
     }
 
     const serverContent = payload?.serverContent || payload?.server_content;
@@ -582,6 +600,14 @@ export default function AudioRecorder({
         )}`
       );
       onResponse?.(data);
+      if (data?.transcript) {
+        persistMessage("user", data.transcript);
+        onTranscript?.({ role: "user", content: data.transcript });
+      }
+      if (data?.assistant_text) {
+        persistMessage("assistant", data.assistant_text);
+        onTranscript?.({ role: "assistant", content: data.assistant_text });
+      }
       await playVoiceFallback(data);
       setStatus("Ascult continuu...");
     } catch (error) {
@@ -627,6 +653,14 @@ export default function AudioRecorder({
           )}`
         );
         onResponse?.(payload.payload);
+        if (payload.payload?.transcript) {
+          persistMessage("user", payload.payload.transcript);
+          onTranscript?.({ role: "user", content: payload.payload.transcript });
+        }
+        if (payload.payload?.assistant_text) {
+          persistMessage("assistant", payload.payload.assistant_text);
+          onTranscript?.({ role: "assistant", content: payload.payload.assistant_text });
+        }
         await playVoiceFallback(payload.payload);
         setStatus("Ascult continuu...");
       }
@@ -917,8 +951,8 @@ export default function AudioRecorder({
               systemInstruction: {
                 parts: [
                   {
-                    text:
-                      "Ești un intervievator tehnic pentru simulări de interviu. Vorbești exclusiv în limba română, cu ton profesionist și clar. Reguli: pune o singură întrebare pe tură; după întrebare, oprește-te și așteaptă răspunsul utilizatorului; dacă răspunsul este neclar sau nu se aude, spune explicit «Nu s-a auzit clar, te rog repetă»; nu spune niciodată «corect» fără un motiv scurt; nu sări la următoarea întrebare fără confirmarea unui răspuns real.",
+                    text: systemPromptRef.current ||
+                      "Ești un intervievator pentru simulări de interviu. Vorbești exclusiv în limba română, cu ton profesionist și clar. Pune o singură întrebare pe tură; după întrebare, oprește-te și așteaptă răspunsul utilizatorului.",
                   },
                 ],
               },
@@ -1128,6 +1162,7 @@ export default function AudioRecorder({
   };
 
   const startRecording = async () => {
+    manuallyStoppedRef.current = false;
     pushDebug(
       `startRecording mode=${liveMode ? "gemini_live" : "batch"} provider=${
         providerRef.current
@@ -1143,7 +1178,8 @@ export default function AudioRecorder({
   };
 
   const stopRecording = async () => {
-    pushDebug("stopRecording");
+    manuallyStoppedRef.current = true;
+    pushDebug("stopRecording (manual)");
     stopBatchMode();
     await stopGeminiLiveMode();
     setIsRecording(false);
@@ -1151,11 +1187,14 @@ export default function AudioRecorder({
   };
 
   useEffect(() => {
-    if (autoRecord && sessionId && !isRecording) {
+    if (autoRecord && sessionId && !isRecording && !manuallyStoppedRef.current) {
       void startRecording();
     }
     if (!autoRecord && isRecording) {
       void stopRecording();
+    }
+    if (!autoRecord) {
+      manuallyStoppedRef.current = false;
     }
   }, [autoRecord, sessionId, isRecording, liveMode]);
 
@@ -1213,9 +1252,11 @@ export default function AudioRecorder({
             {autoRecord ? "Repornește microfonul" : "Pornește microfon"}
           </button>
         )}
-        <button className="btn-ghost" onClick={stopRecording} disabled={!isRecording || autoRecord}>
-          Oprește
-        </button>
+        {isRecording && (
+          <button className="btn-ghost" onClick={stopRecording}>
+            Oprește
+          </button>
+        )}
       </div>
       {status && <p className="muted text-sm">{status}</p>}
       <details className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">

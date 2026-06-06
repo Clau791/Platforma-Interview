@@ -28,7 +28,9 @@ def create_session(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    session = InterviewSession(user_id=current_user.id, config=payload.config, status="pending")
+    if payload.mode not in ("normal", "technical"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mode must be 'normal' or 'technical'")
+    session = InterviewSession(user_id=current_user.id, mode=payload.mode, config=payload.config, status="pending")
     db.add(session)
     db.commit()
     db.refresh(session)
