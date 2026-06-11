@@ -9,13 +9,14 @@ const DEFAULT_CODE = {
   javascript: "// scrie soluția ta aici\n\n",
 };
 
-export default function CodeEditor({ sessionId, problemDescription = "" }) {
+export default function CodeEditor({ sessionId, problemDescription = "", onReviewComplete, onSendToInterviewer }) {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState(DEFAULT_CODE.python);
   const [output, setOutput] = useState("");
   const [review, setReview] = useState(null);
   const [runStatus, setRunStatus] = useState("");
   const [reviewStatus, setReviewStatus] = useState("");
+  const [liveSendStatus, setLiveSendStatus] = useState("");
   const [lastStdout, setLastStdout] = useState("");
   const [lastStderr, setLastStderr] = useState("");
   const [lastExitCode, setLastExitCode] = useState(null);
@@ -50,6 +51,16 @@ export default function CodeEditor({ sessionId, problemDescription = "" }) {
     }
   };
 
+  const sendToInterviewer = () => {
+    if (!onSendToInterviewer) return;
+    const ok = onSendToInterviewer(code, language);
+    setLiveSendStatus(
+      ok
+        ? "Cod trimis intervievatorului live — îți va răspunde prin voce."
+        : "Nu am putut trimite codul (interviul live nu este activ)."
+    );
+  };
+
   const submitReview = async () => {
     if (!sessionId) return;
     setReviewStatus("Analizez codul...");
@@ -67,6 +78,7 @@ export default function CodeEditor({ sessionId, problemDescription = "" }) {
       });
       setReview(data);
       setReviewStatus("");
+      onReviewComplete?.(data);
     } catch (error) {
       setReviewStatus(error.message);
     }
@@ -74,22 +86,32 @@ export default function CodeEditor({ sessionId, problemDescription = "" }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <select
-          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-1.5 text-sm"
-          value={language}
-          onChange={(e) => handleLanguageChange(e.target.value)}
-        >
-          <option value="python">Python</option>
-          <option value="javascript">JavaScript</option>
-        </select>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="space-y-1">
+          <span className="form-label">Limbaj</span>
+          <select
+            className="rounded-lg border border-[color:var(--border)] bg-white px-3 py-2 text-sm font-semibold text-slate-950 shadow-sm focus:border-[color:var(--accent)] focus:outline-none"
+            value={language}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+          >
+            <option className="bg-white text-slate-950" value="python">Python</option>
+            <option className="bg-white text-slate-950" value="javascript">JavaScript</option>
+          </select>
+        </label>
         <button className="btn-secondary text-sm" onClick={runCode} disabled={!sessionId}>
-          Rulează
+          Rulează codul
         </button>
-        <button className="btn-primary text-sm" onClick={submitReview} disabled={!sessionId}>
-          Trimite pentru review
+        {onSendToInterviewer && (
+          <button className="btn-primary text-sm" onClick={sendToInterviewer} disabled={!sessionId}>
+            Trimite intervievatorului (live)
+          </button>
+        )}
+        <button className="btn-secondary text-sm" onClick={submitReview} disabled={!sessionId}>
+          Review scris
         </button>
       </div>
+
+      {liveSendStatus && <p className="muted text-xs">{liveSendStatus}</p>}
 
       <Editor
         height="300px"

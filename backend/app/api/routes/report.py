@@ -9,6 +9,7 @@ from app.models.interview_session import InterviewSession
 from app.models.profile import Profile
 from app.schemas.report import ReportResponse
 from app.services.report_service import generate_report
+from app.utils.errors import AppError
 from app.utils.jwt import get_current_user
 
 
@@ -44,7 +45,11 @@ async def generate_session_report(
     if profile and profile.preferences:
         context.update(profile.preferences)
 
-    report_json = await generate_report(session.id, db, context=context)
+    try:
+        report_json = await generate_report(session.id, db, context=context)
+    except AppError as exc:
+        status_code = status.HTTP_502_BAD_GATEWAY if exc.code.startswith("gemini_") else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=status_code, detail=exc.message) from exc
     return {"report_json": report_json}
 
 

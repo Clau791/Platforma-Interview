@@ -1,5 +1,6 @@
 import json
 import logging
+import base64
 
 import httpx
 
@@ -10,6 +11,7 @@ from app.utils.errors import AppError
 logger = logging.getLogger(__name__)
 PLACEHOLDER_API_KEYS = {"change_me", "your_api_key", "your_api_key_here"}
 GEMINI_DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+GEMINI_TEXT_FALLBACK_MODEL = "gemini-2.5-flash"
 GEMINI_TTS_VOICES = [
     "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
     "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
@@ -58,6 +60,25 @@ def _is_gemini_native_model(model_name: str | None) -> bool:
         or "native-dialog" in lowered
         or "native_dialog" in lowered
     )
+
+
+def _is_realtime_gemini_model(model_name: str | None) -> bool:
+    lowered = (model_name or "").lower()
+    return _is_gemini_native_model(model_name) or "live" in lowered or "bidi" in lowered
+
+
+def _resolve_gemini_text_model(context: dict | None = None) -> str:
+    candidates = [
+        _context_value(context, "aiTextModel", "ai_text_model", "aiReviewModel", "ai_review_model"),
+        settings.gemini_text_model,
+        _context_value(context, "aiModel", "ai_model"),
+        settings.gemini_model,
+        GEMINI_TEXT_FALLBACK_MODEL,
+    ]
+    for candidate in candidates:
+        if candidate and not _is_realtime_gemini_model(candidate):
+            return candidate
+    return GEMINI_TEXT_FALLBACK_MODEL
 
 
 def _resolve_gemini_tts_model(context: dict | None = None) -> str:
@@ -139,7 +160,7 @@ async def generate_reply(prompt: str, context: dict | None = None) -> str:
     """Generate a text reply using Gemini."""
     text = prompt.strip() or "Start the interview and ask the first question."
     system_prompt = _build_system_prompt(context)
-    model = _context_value(context, "aiModel", "ai_model") or settings.gemini_model
+    model = _resolve_gemini_text_model(context)
 
     payload = {
         "contents": [
@@ -168,6 +189,49 @@ async def generate_reply(prompt: str, context: dict | None = None) -> str:
     if not result:
         raise AppError("Gemini response empty", code="gemini_empty")
     return result
+
+
+async def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/webm", context: dict | None = None) -> str:
+    if not audio_bytes:
+        raise AppError("Audio payload is empty", code="empty_audio")
+
+    model = _resolve_gemini_text_model(context)
+    encoded_audio = base64.b64encode(audio_bytes).decode("ascii")
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "Transcrie audio-ul urmator in limba romana. "
+                            "Returneaza doar transcrierea, fara explicatii si fara markdown."
+                        )
+                    },
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type or "audio/webm",
+                            "data": encoded_audio,
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.0,
+        },
+    }
+    data = await _gemini_generate_content(model, payload, context=context, timeout_seconds=30)
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise AppError("Gemini returned no transcription", code="stt_no_result")
+
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    transcript = "\n".join(str(part.get("text", "")).strip() for part in parts if part.get("text")).strip()
+    if not transcript:
+        raise AppError("Audio transcription is empty", code="stt_empty")
+    return transcript
 
 
 def _build_system_prompt(context: dict | None) -> str:

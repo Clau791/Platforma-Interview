@@ -9,12 +9,25 @@ from app.models.interview_session import InterviewSession
 from app.models.emotion_snapshot import EmotionSnapshot
 from app.models.code_run import CodeRun
 from app.models.interview_report import InterviewReport
-from app.services.ai_client import _gemini_generate_content, _resolve_gemini_api_key
+from app.services.ai_client import _gemini_generate_content, _is_gemini_native_model
 from app.core.config import settings
 from app.utils.errors import AppError
 
 
 logger = logging.getLogger(__name__)
+
+
+def _is_realtime_model(model_name: str | None) -> bool:
+    lowered = (model_name or "").lower()
+    return _is_gemini_native_model(model_name) or "live" in lowered or "bidi" in lowered
+
+
+def _resolve_report_model() -> str:
+    if settings.gemini_text_model and not _is_realtime_model(settings.gemini_text_model):
+        return settings.gemini_text_model
+    if settings.gemini_model and not _is_realtime_model(settings.gemini_model):
+        return settings.gemini_model
+    return "gemini-2.5-flash"
 
 REPORT_PROMPT_TEMPLATE = """Ești un evaluator senior de interviuri. Analizează datele de mai jos și generează un raport structurat.
 
@@ -132,7 +145,7 @@ async def generate_report(session_id: UUID, db: Session, context: dict | None = 
         code_reviews_template=code_reviews_template,
     )
 
-    model = settings.gemini_model
+    model = _resolve_report_model()
     payload = {
         "contents": [
             {

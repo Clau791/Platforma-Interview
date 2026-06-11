@@ -1,16 +1,59 @@
 import logging
+import json
 
-from app.services.ai_client import _gemini_generate_content, _resolve_gemini_api_key
+from app.services.ai_client import _context_value, _gemini_generate_content, _is_gemini_native_model
 from app.core.config import settings
 from app.utils.errors import AppError
 
 
 logger = logging.getLogger(__name__)
+GEMINI_TEXT_FALLBACK_MODEL = "gemini-2.5-flash"
 
-REVIEW_PROMPT_TEMPLATE = """Ești un reviewer de cod senior. Analizează soluția candidatului pentru problema de mai jos.
+
+def _is_realtime_model(model_name: str | None) -> bool:
+    lowered = (model_name or "").lower()
+    return _is_gemini_native_model(model_name) or "live" in lowered or "bidi" in lowered
+
+
+def _resolve_review_model(context: dict | None = None) -> str:
+    candidates = [
+        _context_value(context, "aiReviewModel", "ai_review_model", "aiTextModel", "ai_text_model"),
+        _context_value(context, "aiModel", "ai_model"),
+        settings.gemini_text_model,
+        settings.gemini_model,
+        GEMINI_TEXT_FALLBACK_MODEL,
+    ]
+    for candidate in candidates:
+        if candidate and not _is_realtime_model(candidate):
+            return candidate
+    return GEMINI_TEXT_FALLBACK_MODEL
+
+
+def _format_interview_history(context: dict | None) -> str:
+    history = (context or {}).get("interviewHistory") or []
+    if not history:
+        return "Nu există istoric disponibil."
+
+    lines = []
+    for item in history[-30:]:
+        role = str(item.get("role", "unknown")).strip() or "unknown"
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        if len(content) > 2000:
+            content = f"{content[:2000]}..."
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines) or "Nu există istoric disponibil."
+
+
+REVIEW_PROMPT_TEMPLATE = """Ești același intervievator AI din interviul tehnic curent și faci review la soluția candidatului în contextul conversației.
+Ține cont de istoricul interviului, cerința discutată, clarificări și output-ul execuției.
 
 **Problema:**
 {problem}
+
+**Istoric interviu:**
+{interview_history}
 
 **Limbaj:** {language}
 
@@ -50,12 +93,13 @@ async def review_code(
         problem=problem_description or "Nu a fost specificată o problemă.",
         language=language,
         source_code=source_code,
+        interview_history=_format_interview_history(context),
         stdout=stdout or "(gol)",
         stderr=stderr or "(gol)",
         exit_code=exit_code,
     )
 
-    model = settings.gemini_model
+    model = _resolve_review_model(context)
     payload = {
         "contents": [
             {
@@ -80,7 +124,6 @@ async def review_code(
     text_chunks = [str(part.get("text", "")).strip() for part in parts if part.get("text")]
     raw_text = "\n".join(text_chunks).strip()
 
-    import json
     try:
         result = json.loads(raw_text)
     except json.JSONDecodeError:

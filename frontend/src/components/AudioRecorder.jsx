@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { getToken } from "../lib/auth";
 import { API_BASE_URL, apiRequest } from "../lib/api";
@@ -234,7 +234,7 @@ function speakWithBrowser(text, preferredGender = "female") {
   return true;
 }
 
-export default function AudioRecorder({
+function AudioRecorder({
   sessionId,
   onResponse,
   onTranscript,
@@ -248,7 +248,7 @@ export default function AudioRecorder({
   ttsVoice = "",
   profileName = "",
   systemPrompt = "",
-}) {
+}, ref) {
   const liveMode = useMemo(
     () => aiProvider === "gemini" && isGeminiNativeModel(aiModel),
     [aiProvider, aiModel]
@@ -299,7 +299,14 @@ export default function AudioRecorder({
   const liveBinaryEndianVotesRef = useRef({ le: 0, be: 0 });
   const liveBinaryProbeCountRef = useRef(0);
   const liveOutputSampleRateRef = useRef(24000);
+  const liveTranscriptBuffersRef = useRef({ user: "", assistant: "" });
+  const liveTranscriptKeysRef = useRef({ user: null, assistant: null });
+  const liveTranscriptCounterRef = useRef(0);
   const manuallyStoppedRef = useRef(false);
+  // Karaoke: dezvăluie textul intervievatorului în ritmul redării audio.
+  const assistantRevealTimerRef = useRef(null);
+  const assistantAudioStartRef = useRef(0);
+  const assistantRevealedCountRef = useRef(0);
 
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState("");
@@ -374,7 +381,158 @@ export default function AudioRecorder({
     apiRequest(`/sessions/${sid}/messages`, {
       method: "POST",
       body: { role, content: content.trim() },
-    }).catch(() => {});
+    }).catch(() => { });
+  };
+
+  // Injectează codul curent din editor în aceeași sesiune Gemini Live,
+  // ca o tură de tip "user". Intervievatorul care vorbește îl primește direct
+  // și poate comenta prin voce, fără un al doilea model separat.
+  const sendCodeContext = (code, language = "python") => {
+    const socket = liveSocketRef.current;
+    const snippet = (code || "").trim();
+    if (!snippet) {
+      setStatus("Nu există cod de trimis.");
+      return false;
+    }
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setStatus("Conexiunea live nu este activă. Pornește interviul mai întâi.");
+      return false;
+    }
+    const message =
+      `Acesta este codul meu curent din editor (limbaj: ${language}). ` +
+      `Te rog uită-te peste el și discută-l cu mine prin voce:\n\n` +
+      "```" + language + "\n" + snippet + "\n```";
+    socket.send(
+      JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [{ text: message }] }],
+          turnComplete: true,
+        },
+      })
+    );
+    persistMessage("user", message);
+    onTranscript?.({
+      role: "user",
+      content: message,
+      client_id: `code-${Date.now()}`,
+      partial: false,
+    });
+    setStatus("Codul a fost trimis intervievatorului live.");
+    pushDebug(`Live code context sent lang=${language} chars=${snippet.length}`);
+    return true;
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      sendCodeContext,
+      isLiveReady: () => liveSocketRef.current?.readyState === WebSocket.OPEN,
+    }),
+    []
+  );
+
+  const getLiveTranscriptKey = (role) => {
+    if (!liveTranscriptKeysRef.current[role]) {
+      liveTranscriptCounterRef.current += 1;
+      liveTranscriptKeysRef.current[role] = `live-${role}-${Date.now()}-${liveTranscriptCounterRef.current}`;
+    }
+    return liveTranscriptKeysRef.current[role];
+  };
+
+  const mergeTranscriptText = (previous, next) => {
+    const current = (previous || "").trim();
+    const incoming = (next || "").trim();
+    if (!incoming) return current;
+    if (!current) return incoming;
+    if (incoming.startsWith(current)) return incoming;
+    if (current.endsWith(incoming)) return current;
+    return `${current} ${incoming}`;
+  };
+
+  const stopAssistantReveal = () => {
+    if (assistantRevealTimerRef.current) {
+      window.clearInterval(assistantRevealTimerRef.current);
+      assistantRevealTimerRef.current = null;
+    }
+  };
+
+  // Câte caractere din textul intervievatorului ar trebui să fie vizibile acum,
+  // în funcție de cât audio s-a redat deja din tura curentă.
+  const emitAssistantReveal = () => {
+    const target = liveTranscriptBuffersRef.current.assistant || "";
+    if (!target) return;
+    const ctx = outputAudioCtxRef.current;
+    let progress = 1;
+    if (ctx) {
+      const start = assistantAudioStartRef.current;
+      const end = outputCursorRef.current;
+      progress = end > start ? (ctx.currentTime - start) / (end - start) : 1;
+      progress = Math.max(0, Math.min(1, progress));
+    }
+    // monoton: textul afișat nu dă niciodată înapoi în cadrul aceleiași ture
+    let revealCount = Math.floor(progress * target.length);
+    revealCount = Math.max(assistantRevealedCountRef.current, revealCount);
+    revealCount = Math.min(revealCount, target.length);
+    assistantRevealedCountRef.current = revealCount;
+    if (revealCount <= 0) return;
+    onTranscript?.({
+      role: "assistant",
+      content: target.slice(0, revealCount),
+      client_id: getLiveTranscriptKey("assistant"),
+      partial: true,
+    });
+  };
+
+  const startAssistantReveal = () => {
+    if (assistantRevealTimerRef.current) return;
+    assistantRevealTimerRef.current = window.setInterval(emitAssistantReveal, 80);
+  };
+
+  const updateLiveTranscript = (role, text) => {
+    const previous = liveTranscriptBuffersRef.current[role];
+    const content = mergeTranscriptText(previous, text);
+    if (!content) return;
+    liveTranscriptBuffersRef.current[role] = content;
+    if (role === "assistant" && liveMode) {
+      // În modul live, textul intervievatorului e dezvăluit treptat de ticker,
+      // sincronizat cu vocea — nu îl emitem dintr-o dată.
+      if (!previous) {
+        assistantRevealedCountRef.current = 0;
+        assistantAudioStartRef.current = outputAudioCtxRef.current?.currentTime ?? 0;
+      }
+      startAssistantReveal();
+      return;
+    }
+    onTranscript?.({
+      role,
+      content,
+      client_id: getLiveTranscriptKey(role),
+      partial: true,
+    });
+  };
+
+  const flushLiveTranscript = (role) => {
+    if (role === "assistant") {
+      stopAssistantReveal();
+      assistantRevealedCountRef.current = 0;
+    }
+    const content = (liveTranscriptBuffersRef.current[role] || "").trim();
+    const clientId = liveTranscriptKeysRef.current[role];
+    if (!content || !clientId) return;
+    persistMessage(role, content);
+    onTranscript?.({
+      role,
+      content,
+      client_id: clientId,
+      partial: false,
+    });
+    liveTranscriptBuffersRef.current[role] = "";
+    liveTranscriptKeysRef.current[role] = null;
+  };
+
+  const resetLiveTranscripts = () => {
+    liveTranscriptBuffersRef.current = { user: "", assistant: "" };
+    liveTranscriptKeysRef.current = { user: null, assistant: null };
   };
 
   const emitAssistantText = (text) => {
@@ -402,7 +560,7 @@ export default function AudioRecorder({
         new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
       outputAudioCtxRef.current = outputContext;
       if (outputContext.state !== "running") {
-        outputContext.resume().catch(() => {});
+        outputContext.resume().catch(() => { });
       }
       const float32 = new Float32Array(pcm16.length);
       let sumSquares = 0;
@@ -421,6 +579,10 @@ export default function AudioRecorder({
 
       const now = outputContext.currentTime;
       const startAt = Math.max(now, outputCursorRef.current);
+      // Coada audio s-a golit => începe o nouă rostire: ancorăm ceasul de karaoke.
+      if (outputCursorRef.current <= now + 0.02) {
+        assistantAudioStartRef.current = startAt;
+      }
       source.start(startAt);
       outputCursorRef.current = startAt + buffer.duration;
       const holdMs = Math.ceil(buffer.duration * 1000) + LIVE_MODEL_SPEAKING_GRACE_MS;
@@ -443,7 +605,7 @@ export default function AudioRecorder({
         new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
       outputAudioCtxRef.current = outputContext;
       if (outputContext.state !== "running") {
-        outputContext.resume().catch(() => {});
+        outputContext.resume().catch(() => { });
       }
       const float32 = new Float32Array(pcm16.length);
       let sumSquares = 0;
@@ -462,6 +624,10 @@ export default function AudioRecorder({
 
       const now = outputContext.currentTime;
       const startAt = Math.max(now, outputCursorRef.current);
+      // Coada audio s-a golit => începe o nouă rostire: ancorăm ceasul de karaoke.
+      if (outputCursorRef.current <= now + 0.02) {
+        assistantAudioStartRef.current = startAt;
+      }
       source.start(startAt);
       outputCursorRef.current = startAt + buffer.duration;
       const holdMs = Math.ceil(buffer.duration * 1000) + LIVE_MODEL_SPEAKING_GRACE_MS;
@@ -520,8 +686,8 @@ export default function AudioRecorder({
         pushDebug(`Gemini output transcription preview="${outputTranscription.slice(0, 80)}"`);
       }
       emitAssistantText(outputTranscription);
-      persistMessage("assistant", outputTranscription);
-      onTranscript?.({ role: "assistant", content: outputTranscription });
+      flushLiveTranscript("user");
+      updateLiveTranscript("assistant", outputTranscription);
     }
 
     const inputTranscription =
@@ -531,8 +697,8 @@ export default function AudioRecorder({
       payload?.serverContent?.input_transcription?.text;
     if (inputTranscription) {
       setStatus("Te aud. Continuă să vorbești natural.");
-      persistMessage("user", inputTranscription);
-      onTranscript?.({ role: "user", content: inputTranscription });
+      flushLiveTranscript("assistant");
+      updateLiveTranscript("user", inputTranscription);
     }
 
     const serverContent = payload?.serverContent || payload?.server_content;
@@ -542,6 +708,7 @@ export default function AudioRecorder({
 
     if (serverContent.interrupted && outputAudioCtxRef.current) {
       outputCursorRef.current = outputAudioCtxRef.current.currentTime;
+      flushLiveTranscript("assistant");
     }
 
     const parts = serverContent?.modelTurn?.parts || serverContent?.model_turn?.parts || [];
@@ -562,6 +729,16 @@ export default function AudioRecorder({
         }
         enqueueGeminiAudio(inline.data, inline.mimeType || inline.mime_type);
       }
+    }
+
+    if (
+      serverContent.turnComplete ||
+      serverContent.turn_complete ||
+      serverContent.generationComplete ||
+      serverContent.generation_complete
+    ) {
+      flushLiveTranscript("assistant");
+      flushLiveTranscript("user");
     }
   };
 
@@ -687,6 +864,8 @@ export default function AudioRecorder({
   const stopGeminiLiveMode = async () => {
     liveReadyRef.current = false;
     liveGreetingSentRef.current = false;
+    flushLiveTranscript("assistant");
+    flushLiveTranscript("user");
     const socket = liveSocketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       try {
@@ -863,6 +1042,7 @@ export default function AudioRecorder({
       liveBinaryEndianVotesRef.current = { le: 0, be: 0 };
       liveBinaryProbeCountRef.current = 0;
       liveOutputSampleRateRef.current = 24000;
+      resetLiveTranscripts();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -1021,8 +1201,7 @@ export default function AudioRecorder({
           }
           if (liveMessagesReceivedRef.current % 20 === 0) {
             pushDebug(
-              `Gemini Live WS rx_count=${liveMessagesReceivedRef.current} setup=${
-                Boolean(payload.setupComplete || payload.setup_complete)
+              `Gemini Live WS rx_count=${liveMessagesReceivedRef.current} setup=${Boolean(payload.setupComplete || payload.setup_complete)
               } keys=${Object.keys(payload || {}).join(",")}`
             );
           }
@@ -1054,6 +1233,7 @@ export default function AudioRecorder({
 
       socket.onclose = (event) => {
         liveSocketRef.current = null;
+        stopAssistantReveal();
         pushDebug(`Gemini Live WS close code=${event.code} reason=${event.reason || "-"}`);
         if (event.code !== 1000) {
           setStatus(`Conexiunea Gemini s-a închis (${event.code}): ${event.reason || "fără detalii"}`);
@@ -1078,8 +1258,7 @@ export default function AudioRecorder({
           liveFramesDroppedSocketRef.current += 1;
           if (liveFramesDroppedSocketRef.current % 30 === 0) {
             pushDebug(
-              `Gemini live drop reason=socket state=${liveSocket ? liveSocket.readyState : -1} drops=${
-                liveFramesDroppedSocketRef.current
+              `Gemini live drop reason=socket state=${liveSocket ? liveSocket.readyState : -1} drops=${liveFramesDroppedSocketRef.current
               }`
             );
           }
@@ -1164,10 +1343,8 @@ export default function AudioRecorder({
   const startRecording = async () => {
     manuallyStoppedRef.current = false;
     pushDebug(
-      `startRecording mode=${liveMode ? "gemini_live" : "batch"} provider=${
-        providerRef.current
-      } ai_model=${modelRef.current || "-"} tts_model=${ttsModelRef.current || "-"} tts_voice=${
-        ttsVoiceRef.current || "-"
+      `startRecording mode=${liveMode ? "gemini_live" : "batch"} provider=${providerRef.current
+      } ai_model=${modelRef.current || "-"} tts_model=${ttsModelRef.current || "-"} tts_voice=${ttsVoiceRef.current || "-"
       }`
     );
     if (liveMode) {
@@ -1215,12 +1392,9 @@ export default function AudioRecorder({
       pushDebug(
         `Gemini live heartbeat state=${readyState} tx_frames=${liveFramesSentRef.current} tx_kb=${Math.round(
           liveBytesSentRef.current / 1024
-        )} rx_msgs=${liveMessagesReceivedRef.current} cb=${liveAudioCallbacksRef.current} drop_not_ready=${
-          liveFramesDroppedNotReadyRef.current
-        } drop_socket=${liveFramesDroppedSocketRef.current} drop_model=${
-          liveFramesDroppedModelSpeakingRef.current
-        } drop_silence=${liveFramesDroppedSilenceRef.current} rx_audio_chunks=${
-          liveAudioChunksReceivedRef.current
+        )} rx_msgs=${liveMessagesReceivedRef.current} cb=${liveAudioCallbacksRef.current} drop_not_ready=${liveFramesDroppedNotReadyRef.current
+        } drop_socket=${liveFramesDroppedSocketRef.current} drop_model=${liveFramesDroppedModelSpeakingRef.current
+        } drop_silence=${liveFramesDroppedSilenceRef.current} rx_audio_chunks=${liveAudioChunksReceivedRef.current
         } rx_text_chunks=${liveTextChunksReceivedRef.current} rms_in=${liveLastInputRmsRef.current.toFixed(
           4
         )} rms_out=${liveLastOutputRmsRef.current.toFixed(
@@ -1239,13 +1413,13 @@ export default function AudioRecorder({
 
   return (
     <div className="space-y-3">
-      {autoRecord && sessionId && (
+      {/* {autoRecord && sessionId && (
         <p className="muted text-xs">
           {liveMode
             ? "Mod live Gemini: audio este trimis continuu, iar modelul detectează capătul de replică."
             : "Mod standard: audio este trimis incremental către backend."}
         </p>
-      )}
+      )} */}
       <div className="flex flex-wrap gap-2">
         {sessionId && !isRecording && (
           <button className="btn-primary" onClick={startRecording} disabled={isRecording || !sessionId}>
@@ -1259,12 +1433,14 @@ export default function AudioRecorder({
         )}
       </div>
       {status && <p className="muted text-sm">{status}</p>}
-      <details className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">
+      {/* <details className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] p-2 text-xs">
         <summary className="cursor-pointer select-none font-medium">Debug audio pipeline</summary>
         <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] text-slate-700">
           {debugLines.length > 0 ? debugLines.join("\n") : "No debug events yet."}
         </pre>
-      </details>
+      </details> */}
     </div>
   );
 }
+
+export default forwardRef(AudioRecorder);

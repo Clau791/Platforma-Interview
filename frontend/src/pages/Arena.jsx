@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import AudioRecorder from "../components/AudioRecorder";
 import CodeEditor from "../components/CodeEditor";
@@ -32,6 +32,54 @@ const TECHNICAL_SYSTEM_PROMPT =
   "nu sări la următoarea problemă fără a discuta soluția curentă.";
 
 
+function ChatHistory({ messages, scrollRef }) {
+  return (
+    <section className="surface-card space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="section-title text-xl">Istoric mesaje</h2>
+        <span className="pill text-xs">{messages.length}</span>
+      </div>
+      <div
+        ref={scrollRef}
+        className="max-h-[420px] min-h-[220px] space-y-3 overflow-y-auto pr-2"
+      >
+        {messages.length === 0 ? (
+          <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-alt)] px-4 text-center text-sm muted">
+            Mesajele vor apărea aici pe măsură ce se desfășoară interviul.
+          </div>
+        ) : (
+          messages.map((message) => {
+            const isUser = message.role === "user";
+            return (
+              <article
+                key={message.client_id || message.id}
+                className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[88%] rounded-lg border px-4 py-3 text-sm leading-6 shadow-sm ${
+                    isUser
+                      ? "border-teal-200 bg-teal-50 text-slate-950"
+                      : "border-slate-200 bg-white text-slate-950"
+                  }`}
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      {isUser ? "Tu" : "Intervievator"}
+                    </span>
+                    {message.partial && <span className="text-[11px] text-slate-500">în curs</span>}
+                  </div>
+                  <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+
 export default function Arena() {
   const [interviewMode, setInterviewMode] = useState(null); // null = mode selection, "normal" | "technical"
   const [sessionId, setSessionId] = useState(null);
@@ -50,9 +98,12 @@ export default function Arena() {
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [lastUserText, setLastUserText] = useState("");
   const [lastAssistantText, setLastAssistantText] = useState("");
+  const [messages, setMessages] = useState([]);
   const [interviewActive, setInterviewActive] = useState(false);
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const messagesScrollRef = useRef(null);
+  const audioRecorderRef = useRef(null);
 
   const normalizeSessionId = (value) => {
     if (!value) return null;
@@ -104,6 +155,59 @@ export default function Arena() {
     }
   };
 
+  const normalizeMessage = (message) => ({
+    id: message.id,
+    client_id: message.client_id || message.id,
+    role: message.role,
+    content: message.content || "",
+    created_at: message.created_at || new Date().toISOString(),
+    partial: Boolean(message.partial),
+  });
+
+  const loadSessionMessages = async (targetSessionId) => {
+    if (!targetSessionId || !getToken()) {
+      setMessages([]);
+      return;
+    }
+    try {
+      const data = await apiRequest(`/sessions/${targetSessionId}/messages`, { method: "GET" });
+      const loaded = (data || []).map(normalizeMessage);
+      setMessages(loaded);
+      const lastUser = [...loaded].reverse().find((item) => item.role === "user");
+      const lastAssistant = [...loaded].reverse().find((item) => item.role === "assistant");
+      setLastUserText(lastUser?.content || "");
+      setLastAssistantText(lastAssistant?.content || "");
+    } catch {
+      setMessages([]);
+    }
+  };
+
+  const upsertTranscriptMessage = ({ role, content, client_id, partial = false }) => {
+    const trimmed = (content || "").trim();
+    if (!role || !trimmed) return;
+    const clientId = client_id || `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setMessages((previous) => {
+      const existingIndex = previous.findIndex((item) => item.client_id === clientId);
+      const nextMessage = normalizeMessage({
+        client_id: clientId,
+        role,
+        content: trimmed,
+        partial,
+        created_at: new Date().toISOString(),
+      });
+      if (existingIndex === -1) {
+        return [...previous, nextMessage];
+      }
+      return previous.map((item, index) =>
+        index === existingIndex
+          ? { ...item, content: trimmed, partial: Boolean(partial), created_at: item.created_at }
+          : item
+      );
+    });
+    if (role === "user") setLastUserText(trimmed);
+    if (role === "assistant") setLastAssistantText(trimmed);
+  };
+
   const createAndStartSession = async (mode) => {
     if (!getToken()) {
       setStatus("Autentifică-te pentru a crea o sesiune.");
@@ -111,13 +215,24 @@ export default function Arena() {
     }
     setStatus("Creez sesiunea...");
     try {
+      const aiContext = {
+        difficulty: "medium",
+        aiProvider: "gemini",
+        aiModel,
+        aiTtsModel,
+        ttsVoice,
+        voiceGender,
+        interviewGender: avatarGender,
+        profileName,
+      };
       const data = await apiRequest("/sessions", {
         method: "POST",
-        body: { mode, config: { difficulty: "medium" } },
+        body: { mode, config: aiContext },
       });
       const newId = data.id;
       setSessionId(newId);
       setInterviewMode(mode);
+      setMessages([]);
 
       setStatus("Pornesc sesiunea...");
       await apiRequest(`/sessions/${newId}/start`, { method: "POST" });
@@ -167,6 +282,7 @@ export default function Arena() {
     setAssistantText("");
     setLastUserText("");
     setLastAssistantText("");
+    setMessages([]);
     setEmotion(null);
     setStatus("");
     setReport(null);
@@ -175,6 +291,12 @@ export default function Arena() {
   useEffect(() => {
     fetchHistory();
   }, []);
+
+  useEffect(() => {
+    const node = messagesScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [messages]);
 
   const systemPrompt = interviewMode === "technical" ? TECHNICAL_SYSTEM_PROMPT : NORMAL_SYSTEM_PROMPT;
 
@@ -257,6 +379,8 @@ export default function Arena() {
                       setSessionId(item.id);
                       setShowAvatar(true);
                       setInterviewActive(item.status === "in_progress");
+                      setReport(null);
+                      loadSessionMessages(item.id);
                     }}
                   >
                     Deschide
@@ -316,9 +440,8 @@ export default function Arena() {
                   setAssistantText((prev) => (prev ? prev + " " + data.assistant_text : data.assistant_text));
                 }
               }}
-              onTranscript={({ role, content }) => {
-                if (role === "user") setLastUserText(content);
-                else if (role === "assistant") setLastAssistantText(content);
+              onTranscript={({ role, content, client_id, partial }) => {
+                upsertTranscriptMessage({ role, content, client_id, partial });
               }}
             />
 
@@ -338,20 +461,7 @@ export default function Arena() {
               </div>
             )}
 
-            {(lastAssistantText || assistantText) && (
-              <div className="surface-card" style={{ minHeight: "160px" }}>
-                {lastUserText && (
-                  <div className="mb-3 rounded-lg bg-[color:var(--surface-alt)] p-2">
-                    <p className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: "0.1em" }}>Tu</p>
-                    <p className="mt-1 text-sm" style={{ whiteSpace: "pre-wrap" }}>{lastUserText}</p>
-                  </div>
-                )}
-                <p className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: "0.1em" }}>Intervievator</p>
-                <p className="mt-3" style={{ fontSize: "1.1rem", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>
-                  {lastAssistantText || assistantText}
-                </p>
-              </div>
-            )}
+            <ChatHistory messages={messages} scrollRef={messagesScrollRef} />
           </div>
 
           <div className="space-y-4">
@@ -374,6 +484,7 @@ export default function Arena() {
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
             <AudioRecorder
+              ref={audioRecorderRef}
               sessionId={sessionId}
               aiProvider="gemini"
               aiModel={aiModel}
@@ -390,30 +501,23 @@ export default function Arena() {
                   setAssistantText((prev) => (prev ? prev + " " + data.assistant_text : data.assistant_text));
                 }
               }}
-              onTranscript={({ role, content }) => {
-                if (role === "user") setLastUserText(content);
-                else if (role === "assistant") setLastAssistantText(content);
+              onTranscript={({ role, content, client_id, partial }) => {
+                upsertTranscriptMessage({ role, content, client_id, partial });
               }}
             />
 
-            {(lastAssistantText || assistantText) && (
-              <div className="surface-card" style={{ minHeight: "140px" }}>
-                {lastUserText && (
-                  <div className="mb-3 rounded-lg bg-[color:var(--surface-alt)] p-2">
-                    <p className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: "0.1em" }}>Tu</p>
-                    <p className="mt-1 text-sm" style={{ whiteSpace: "pre-wrap" }}>{lastUserText}</p>
-                  </div>
-                )}
-                <p className="muted text-xs" style={{ textTransform: "uppercase", letterSpacing: "0.1em" }}>Intervievator</p>
-                <p className="mt-3" style={{ fontSize: "1.05rem", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>
-                  {lastAssistantText || assistantText}
-                </p>
-              </div>
-            )}
+            <ChatHistory messages={messages} scrollRef={messagesScrollRef} />
           </div>
 
           <div className="space-y-4">
-            <CodeEditor sessionId={sessionId} problemDescription={lastAssistantText} />
+            <CodeEditor
+              sessionId={sessionId}
+              problemDescription={lastAssistantText}
+              onReviewComplete={() => loadSessionMessages(sessionId)}
+              onSendToInterviewer={(code, language) =>
+                audioRecorderRef.current?.sendCodeContext(code, language)
+              }
+            />
           </div>
         </div>
       )}

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = 64
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash-live-001"
+    gemini_text_model: str = "gemini-2.5-flash"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
