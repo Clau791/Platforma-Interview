@@ -253,6 +253,84 @@ def _build_system_prompt(context: dict | None) -> str:
     return f"{base_prompt}\nContext: {context_json}"
 
 
+def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int, channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    import struct
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    data_size = len(pcm_bytes)
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + data_size)
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, channels, sample_rate, byte_rate, block_align, bits_per_sample)
+        + b"data"
+        + struct.pack("<I", data_size)
+        + pcm_bytes
+    )
+
+
+def _parse_sample_rate(mime_type: str | None) -> int:
+    if not mime_type:
+        return 24000
+    for token in mime_type.split(";"):
+        token = token.strip().lower()
+        if token.startswith("rate="):
+            try:
+                return int(token.split("=", 1)[1])
+            except (ValueError, IndexError):
+                pass
+    return 24000
+
+
+async def preview_gemini_voice(
+    voice: str,
+    *,
+    context: dict | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    sample_text: str = "Bună! Acesta este un test scurt de voce.",
+) -> dict:
+    """Generează un sample audio pentru o singură voce și îl returnează ca WAV base64."""
+    test_context = dict(context or {})
+    if api_key:
+        test_context["geminiApiKey"] = api_key
+    tts_model = model or _resolve_gemini_tts_model(test_context)
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": sample_text}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": voice}
+                }
+            },
+        },
+    }
+    data = await _gemini_generate_content(tts_model, payload, context=test_context, timeout_seconds=45)
+    candidates = data.get("candidates") or []
+    for candidate in candidates:
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            inline = part.get("inlineData") or part.get("inline_data")
+            if not inline:
+                continue
+            mime_type = inline.get("mimeType") or inline.get("mime_type")
+            audio_b64 = inline.get("data")
+            if not audio_b64:
+                continue
+            pcm_bytes = base64.b64decode(audio_b64)
+            sample_rate = _parse_sample_rate(mime_type)
+            wav_bytes = _pcm_to_wav(pcm_bytes, sample_rate)
+            return {
+                "voice": voice,
+                "audio_b64": base64.b64encode(wav_bytes).decode("ascii"),
+                "mime_type": "audio/wav",
+                "sample_rate": sample_rate,
+            }
+    raise AppError(f"Gemini did not return audio for voice {voice}", code="gemini_no_audio")
+
+
 async def probe_gemini_voices(
     *,
     context: dict | None = None,

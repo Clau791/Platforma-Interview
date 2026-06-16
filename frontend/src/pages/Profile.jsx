@@ -19,6 +19,7 @@ export default function Profile() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [voiceProbeLoading, setVoiceProbeLoading] = useState(false);
   const [voiceProbeResults, setVoiceProbeResults] = useState([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const previewAudioRef = useRef(null);
 
   useEffect(() => {
@@ -178,6 +179,45 @@ export default function Profile() {
     }
   };
 
+  const previewSelectedVoice = async () => {
+    const voiceToPreview =
+      ttsVoice || (voiceGender === "male" ? "Puck" : "Kore");
+    if (!geminiApiKey) {
+      setStatus("Adaugă mai întâi cheia Gemini API.");
+      return;
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    setPreviewLoading(true);
+    setStatus(`Generez sample audio pentru vocea ${voiceToPreview}...`);
+    try {
+      const data = await apiRequest("/models/gemini/voices/preview", {
+        method: "POST",
+        body: {
+          voice: voiceToPreview,
+          api_key: geminiApiKey,
+          model: aiTtsModel || "gemini-2.5-flash-preview-tts",
+        },
+      });
+      const binary = atob(data.audio_b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: data.mime_type || "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      previewAudioRef.current = audio;
+      await audio.play();
+      setStatus(`Redau vocea ${voiceToPreview}.`);
+    } catch (err) {
+      setStatus(`Eroare preview voce: ${err.message}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (previewAudioRef.current) {
@@ -321,18 +361,29 @@ export default function Profile() {
             </label>
           <label className="space-y-2">
             <span className="form-label">Voce Gemini (TTS)</span>
-            <select
-              className="input-field"
-              value={ttsVoice}
-              onChange={(event) => setTtsVoice(event.target.value)}
-            >
-              <option value="">Auto după gen (male/female)</option>
-              {geminiVoices.map((voiceName) => (
-                <option key={voiceName} value={voiceName}>
-                  {voiceName}
-                </option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <select
+                className="input-field flex-1"
+                value={ttsVoice}
+                onChange={(event) => setTtsVoice(event.target.value)}
+              >
+                <option value="">Auto după gen (male/female)</option>
+                {geminiVoices.map((voiceName) => (
+                  <option key={voiceName} value={voiceName}>
+                    {voiceName}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-ghost text-xs whitespace-nowrap"
+                onClick={previewSelectedVoice}
+                disabled={previewLoading}
+                title="Ascultă un sample al vocii selectate"
+              >
+                {previewLoading ? "..." : "▶ Ascultă"}
+              </button>
+            </div>
             <span className="muted text-xs">
               Dacă alegi o voce explicită, are prioritate peste setarea Female/Male.
             </span>

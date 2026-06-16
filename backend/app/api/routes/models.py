@@ -24,6 +24,13 @@ class ProbeGeminiVoicesPayload(BaseModel):
     voices: list[str] | None = None
 
 
+class PreviewGeminiVoicePayload(BaseModel):
+    voice: str
+    api_key: str | None = None
+    model: str | None = None
+    sample_text: str = Field(default="Bună! Acesta este un test scurt de voce.")
+
+
 def _raise_provider_http_error(provider: str, exc: httpx.HTTPStatusError) -> None:
     response = exc.response
     detail = f"{provider} API error ({response.status_code})"
@@ -160,3 +167,29 @@ async def probe_gemini_voices(
         "count": len(results),
         "results": results,
     }
+
+
+@router.post("/models/gemini/voices/preview")
+async def preview_gemini_voice(
+    payload: PreviewGeminiVoicePayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    prefs = profile.preferences if profile and profile.preferences else {}
+    key = payload.api_key or prefs.get("geminiApiKey")
+    context = {"geminiApiKey": key} if key else {}
+    try:
+        result = await ai_client.preview_gemini_voice(
+            payload.voice,
+            context=context,
+            api_key=key,
+            model=payload.model,
+            sample_text=payload.sample_text,
+        )
+    except ai_client.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Voice preview failed: {exc}") from exc
+
+    return result
